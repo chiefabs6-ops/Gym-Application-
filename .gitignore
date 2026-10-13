@@ -1,0 +1,30 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.local
+
+# Expo / React Native
+.expo/
+web-build/
+android/
+ios/
+*.jks
+*.keystore
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Downloaded source images for scripts/build-exercise-images.py
+apps/mobile/scripts/.cache/
+
+# RepDB exercise illustrations: licensed for in-app use only, not for publishing as a dataset, so they stay
+# out of this public repo. Regenerate with `python apps/mobile/scripts/build-exercise-images.py`.
+apps/mobile/assets/exercises/*.png
+
+# Stray scratch file
+test.text

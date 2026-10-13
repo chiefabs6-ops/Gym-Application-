@@ -1,0 +1,28 @@
+{
+  "name": "gym-app",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "db:migrate": "npm run db:migrate -w @gym/server",
+    "db:seed": "npm run db:seed -w @gym/server",
+    "dev:server": "npm run dev -w @gym/server",
+    "dev:worker": "npm run dev:worker -w @gym/server",
+    "dev:mobile": "npm run start -w @gym/mobile",
+    "phone": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/mobile/scripts/install-phone.ps1",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

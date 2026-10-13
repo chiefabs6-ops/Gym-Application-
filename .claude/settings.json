@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch)",
+      "Bash(git fetch *)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(tasklist)",
+      "Bash(tasklist *)",
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "Bash(npx vitest run *)",
+      "Bash(npm run typecheck)",
+      "Bash(npm ls)",
+      "Bash(npm ls *)",
+      "Bash(npm audit)",
+      "Bash(adb devices)",
+      "Bash(adb shell dumpsys *)",
+      "Bash(adb logcat -d *)",
+      "Bash(adb exec-out screencap *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-Service *)",
+      "mcp__claude_ai_Google_Drive__get_file_metadata",
+      "mcp__claude_ai_Google_Drive__read_file_content"
+    ]
+  }
+}
