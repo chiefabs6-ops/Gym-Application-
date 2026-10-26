@@ -61,8 +61,8 @@ export function RecipeLogSheet({
             : 'Weigh the whole cooked dish and your plate. Nothing is tracked afterwards.'}
         </Text>
         <View className="flex-row gap-3">
-          <Field label="Cooked weight (g)" value={cooked} onChange={setCooked} />
-          <Field label={kind === 'batch' ? 'Eating now (g)' : 'Eaten (g)'} value={portion} onChange={setPortion} />
+          <Field row label="Cooked weight (g)" value={cooked} onChange={setCooked} />
+          <Field row label={kind === 'batch' ? 'Eating now (g)' : 'Eaten (g)'} value={portion} onChange={setPortion} />
         </View>
         {(tooMuch || error) && <Text className="text-xs text-settype-failure">{tooMuch ? 'You can’t eat more than the cooked weight.' : error}</Text>}
         <Pressable
@@ -77,9 +77,9 @@ export function RecipeLogSheet({
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (t: string) => void }) {
+function Field({ label, value, onChange, row }: { row?: boolean; label: string; value: string; onChange: (t: string) => void }) {
   return (
-    <View className="flex-1 gap-1">
+    <View className={row ? 'flex-1 gap-1' : 'gap-1'}>
       <Text className="text-xs text-ink-muted">{label}</Text>
       <TextInput
         value={value}

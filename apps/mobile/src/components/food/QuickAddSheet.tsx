@@ -52,8 +52,8 @@ export function QuickAddSheet({
       <View className="gap-4">
         <Text className="text-xl font-bold text-ink">{initial ? 'Edit quick add' : 'Quick add'}</Text>
         <View className="flex-row gap-3">
-          <Field label="Calories (kcal)" value={kcal} onChange={setKcal} numeric />
-          <Field label="Protein (g)" value={protein} onChange={setProtein} numeric />
+          <Field row label="Calories (kcal)" value={kcal} onChange={setKcal} numeric />
+          <Field row label="Protein (g)" value={protein} onChange={setProtein} numeric />
         </View>
         <Field label="Name (optional)" value={name} onChange={setName} placeholder="e.g. Restaurant burrito" />
         <Dropdown label="Meal" value={meal} options={MEALS} format={(m) => MEAL_LABELS[m]} onChange={setMeal} />
@@ -79,9 +79,9 @@ export function QuickAddSheet({
   );
 }
 
-function Field({ label, value, onChange, numeric, placeholder }: { label: string; value: string; onChange: (t: string) => void; numeric?: boolean; placeholder?: string }) {
+function Field({ label, value, onChange, numeric, placeholder, row }: { row?: boolean; label: string; value: string; onChange: (t: string) => void; numeric?: boolean; placeholder?: string }) {
   return (
-    <View className="flex-1 gap-1">
+    <View className={row ? 'flex-1 gap-1' : 'gap-1'}>
       <Text className="text-xs text-ink-muted">{label}</Text>
       <TextInput
         value={value}

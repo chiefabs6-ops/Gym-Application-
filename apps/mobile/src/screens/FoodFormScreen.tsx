@@ -139,20 +139,20 @@ export default function FoodFormScreen() {
         {fields.basis === 'serving' && <Field label="Serving weight (g)" value={fields.servingGrams} onChange={set('servingGrams')} error={errors.servingGrams} numeric />}
 
         <View className="flex-row gap-3">
-          <Field label="Energy (kcal)" value={fields.kcal} onChange={set('kcal')} error={errors.kcal} numeric />
-          <Field label="Protein (g)" value={fields.protein} onChange={set('protein')} error={errors.protein} numeric />
+          <Field row label="Energy (kcal)" value={fields.kcal} onChange={set('kcal')} error={errors.kcal} numeric />
+          <Field row label="Protein (g)" value={fields.protein} onChange={set('protein')} error={errors.protein} numeric />
         </View>
         <View className="flex-row gap-3">
-          <Field label="Fat (g)" value={fields.fat} onChange={set('fat')} error={errors.fat} numeric />
-          <Field label="of which saturates (g)" value={fields.satFat} onChange={set('satFat')} error={errors.satFat} numeric />
+          <Field row label="Fat (g)" value={fields.fat} onChange={set('fat')} error={errors.fat} numeric />
+          <Field row label="of which saturates (g)" value={fields.satFat} onChange={set('satFat')} error={errors.satFat} numeric />
         </View>
         <View className="flex-row gap-3">
-          <Field label="Carbohydrate (g)" value={fields.carbs} onChange={set('carbs')} error={errors.carbs} numeric />
-          <Field label="of which sugars (g)" value={fields.sugars} onChange={set('sugars')} error={errors.sugars} numeric />
+          <Field row label="Carbohydrate (g)" value={fields.carbs} onChange={set('carbs')} error={errors.carbs} numeric />
+          <Field row label="of which sugars (g)" value={fields.sugars} onChange={set('sugars')} error={errors.sugars} numeric />
         </View>
         <View className="flex-row gap-3">
-          <Field label="Fibre (g)" value={fields.fibre} onChange={set('fibre')} error={errors.fibre} numeric />
-          <Field label="Salt (g)" value={fields.salt} onChange={set('salt')} error={errors.salt} numeric />
+          <Field row label="Fibre (g)" value={fields.fibre} onChange={set('fibre')} error={errors.fibre} numeric />
+          <Field row label="Salt (g)" value={fields.salt} onChange={set('salt')} error={errors.salt} numeric />
         </View>
         <Text className="text-xs text-ink-subtle">Only calories and protein are needed. Leave anything the label doesn’t list blank.</Text>
 
@@ -212,9 +212,9 @@ export default function FoodFormScreen() {
   );
 }
 
-function Field({ label, value, onChange, error, numeric }: { label: string; value: string; onChange: (t: string) => void; error?: string; numeric?: boolean }) {
+function Field({ label, value, onChange, error, numeric, row }: { row?: boolean; label: string; value: string; onChange: (t: string) => void; error?: string; numeric?: boolean }) {
   return (
-    <View className="flex-1 gap-1">
+    <View className={row ? 'flex-1 gap-1' : 'gap-1'}>
       <Text className="text-xs text-ink-muted">{label}</Text>
       <TextInput
         value={value}

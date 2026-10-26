@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import {
   ACTIVITY_LABELS,
   ACTIVITY_LEVELS,
@@ -24,9 +24,9 @@ import { BottomSheet } from '../BottomSheet';
 import { SegmentedControl } from '../SegmentedControl';
 import { Dropdown } from '../food/Dropdown';
 
-function Field({ label, value, onChange, numeric = true, placeholder }: { label: string; value: string; onChange: (t: string) => void; numeric?: boolean; placeholder?: string }) {
+function Field({ label, value, onChange, numeric = true, placeholder, row }: { row?: boolean; label: string; value: string; onChange: (t: string) => void; numeric?: boolean; placeholder?: string }) {
   return (
-    <View className="flex-1 gap-1">
+    <View className={row ? 'flex-1 gap-1' : 'gap-1'}>
       <Text className="text-xs text-ink-muted">{label}</Text>
       <TextInput
         value={value}
@@ -156,24 +156,30 @@ export function ProfileGoalSheet({
   const rates = kind === 'lose' ? LOSE_RATES_KG : kind === 'gain' ? GAIN_RATES_KG : [];
   const effectiveRate = kind === 'maintain' ? 0 : (rates as readonly number[]).includes(rate) ? rate : 0.5;
   const invalid = heightCm === null || heightCm < 100 || heightCm > 250 || !validDob;
+  const heightUnit = unit === 'imperial' ? 'ft/in' : 'cm';
+  const problem =
+    heightCm === null ? `Enter your height (${heightUnit}).`
+    : heightCm < 100 || heightCm > 250 ? 'Height must be between 100 and 250 cm (3 ft 4 in – 8 ft 2 in).'
+    : !validDob ? 'Enter a real date of birth: day, month and a 4-digit year.'
+    : null;
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} avoidKeyboard className="max-h-[92%] px-5 pb-8 pt-3">
+    <BottomSheet visible={visible} onClose={onClose} avoidKeyboard className="max-h-[90%] pt-3">
       <View className="mb-4 h-1 w-10 self-center rounded-full bg-surface-border" />
-      <View className="gap-4">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32, gap: 16 }} keyboardShouldPersistTaps="handled">
         <Text className="text-xl font-bold text-ink">Body &amp; goal</Text>
         {unit === 'imperial' ? (
           <View className="flex-row gap-3">
-            <Field label="Height (ft)" value={ft} onChange={setFt} />
-            <Field label="(in)" value={inch} onChange={setInch} />
+            <Field row label="Height (ft)" value={ft} onChange={setFt} />
+            <Field row label="(in)" value={inch} onChange={setInch} />
           </View>
         ) : (
           <Field label="Height (cm)" value={cm} onChange={setCm} />
         )}
         <View className="flex-row gap-3">
-          <Field label="Day of birth" value={day} onChange={setDay} placeholder="DD" />
-          <Field label="Month" value={month} onChange={setMonth} placeholder="MM" />
-          <Field label="Year" value={year} onChange={setYear} placeholder="YYYY" />
+          <Field row label="Day of birth" value={day} onChange={setDay} placeholder="DD" />
+          <Field row label="Month" value={month} onChange={setMonth} placeholder="MM" />
+          <Field row label="Year" value={year} onChange={setYear} placeholder="YYYY" />
         </View>
         <SegmentedControl value={sex} options={[{ value: 'male', label: 'Male' }, { value: 'female', label: 'Female' }]} onChange={setSex} />
         <Dropdown label="Activity level" value={activity} options={ACTIVITY_LEVELS} format={(a) => ACTIVITY_LABELS[a]} onChange={setActivity} />
@@ -195,6 +201,7 @@ export function ProfileGoalSheet({
             ))}
           </View>
         )}
+        {problem && <Text className="text-xs text-settype-failure">{problem}</Text>}
         <SaveButton
           disabled={invalid}
           onPress={() => {
@@ -203,7 +210,7 @@ export function ProfileGoalSheet({
             onClose();
           }}
         />
-      </View>
+      </ScrollView>
     </BottomSheet>
   );
 }
