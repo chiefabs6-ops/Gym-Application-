@@ -9,7 +9,9 @@ export type MetaKey =
   /** Persisted SAF tree URI of the auto-backup folder. */
   | 'auto_backup_dir'
   | 'auto_backup_enabled'
-  | 'auto_backup_error';
+  | 'auto_backup_error'
+  /** Version of the bundled built-in food list last loaded into builtin_foods. */
+  | 'builtin_foods_version';
 
 export async function deleteMeta(key: MetaKey): Promise<void> {
   await db.runAsync('DELETE FROM sync_meta WHERE key = ?', [key]);

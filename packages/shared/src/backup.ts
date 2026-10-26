@@ -48,7 +48,14 @@ export interface BackupFile {
   telemetry_points: TelemetryPointRow[];
 }
 
-export type ParseBackupResult = { ok: true; backup: BackupFile } | { ok: false; error: string };
+/** `skippedTables`: tables in the file this app version doesn't know (a backup from a newer version). */
+export type ParseBackupResult = { ok: true; backup: BackupFile; skippedTables: string[] } | { ok: false; error: string };
+
+/** User-facing note after a restore that skipped unknown tables; null when nothing was skipped. */
+export function skippedDataMessage(tables: string[]): string | null {
+  if (tables.length === 0) return null;
+  return `Some data (${tables.join(', ')}) was skipped because this backup is from a newer app version. Update the app to restore it.`;
+}
 
 /** Validates untrusted backup text. Errors are user-facing. */
 export function parseBackup(text: string): ParseBackupResult {
@@ -70,7 +77,11 @@ export function parseBackup(text: string): ParseBackupResult {
     const issue = parsed.error.issues[0];
     return { ok: false, error: `The backup is damaged or incomplete (${issue?.path.join('.') ?? 'unknown field'}).` };
   }
-  return { ok: true, backup: parsed.data as unknown as BackupFile };
+  const rawTables = (json as { tables?: unknown }).tables;
+  const known = new Set<string>(SYNC_TABLES);
+  const skippedTables =
+    rawTables && typeof rawTables === 'object' ? Object.keys(rawTables).filter((t) => !known.has(t)) : [];
+  return { ok: true, backup: parsed.data as unknown as BackupFile, skippedTables };
 }
 
 export function countBackupRows(tables: BackupTables): Record<SyncTable, number> {

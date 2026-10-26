@@ -9,7 +9,7 @@
 > - Architecture rules live in `CLAUDE.md`. Every schema change follows the "four places" rule there:
 >   shared zod schema, a new mobile migration, Prisma + migrate, and the snake_case ↔ camelCase mapping.
 >
-> Last updated: 2026-10-08 (2.1–2.11 done)
+> Last updated: 2026-10-26 (2.1–2.11 and 2.13 done; 2.15 food tracking in progress)
 
 ---
 
@@ -367,6 +367,14 @@ Goal: nothing a serious lifter expects is missing from the logging flow.
   - Persistent notification: current exercise, next set target, rest countdown, a **"Complete set"** action.
   - Needs a dev build (notification actions).
   - *Accept:* a set can be logged without unlocking the phone.
+- [~] **2.15 Food tracking, bodyweight & targets** (L) — **do next** (moved ahead of 2.12, 2.14 and Phase 3 on 2026-10-26),
+  spec `docs/superpowers/specs/2026-10-25-food-tracking-design.md`, plan `docs/superpowers/plans/2026-10-25-food-tracking.md`
+  - Food tab (replaces Analytics; Analytics becomes Stats inside History): MyFitnessPal-style diary with four meals,
+    built-in CoFID + USDA food list (offline), Open Food Facts search and barcode lookup (online), label photo for
+    missing products, saved meals, recipes with batches/leftovers, quick add.
+  - History → Body: weigh-ins with trend; calorie/macro targets from Mifflin-St Jeor, goal and weekly rate.
+  - *Accept:* the user's day from spec §1 works end to end on the phone: breakfast of known foods in under 30 seconds;
+    a saved meal or leftover in one or two taps; the daily summary answers "how am I doing today?" at a glance.
 - [ ] **2.12 Fill illustration gaps** (S–M)
   - Find licensed art for the 8 missing exercises, or commission it. Fix the 3 approximations.
   - Built 2026-10-09: all Everkinetic line art replaced with RepDB flat 2D figures (free tier, in-app use with
@@ -400,6 +408,7 @@ Goal: users see their progress clearly, with no caps.
   - Add `secondary_muscles` and `movement_pattern` to exercise definitions (and the canonical list).
   - Weekly sets per muscle (primary 1.0 / secondary 0.5) against target bands (e.g. 10–20).
 - [ ] **3.5 Bodyweight & measurements** (M) *(new synced table `body_metrics`)*
+  - Bodyweight log + trend moved into 2.15; measurements, body-fat % and finish-sheet quick-log stay here.
   - Bodyweight with a trend line (7-day average); circumferences; body-fat %.
   - Quick-log from the finish sheet.
 - [ ] **3.6 Progress photos** (M)
@@ -523,7 +532,8 @@ Start only when the offline app is solid and you want sync. Requires Docker Desk
 | 2.5 ✅ | `session_exercises.superset_group`; `template_exercises[].superset_group` |
 | 2.6 ✅ | `sets.notes` |
 | 3.4 | `exercise_definitions.secondary_muscles[]`, `movement_pattern` |
-| 3.5 | new table `body_metrics` (date, type, value) |
+| 2.15 | new tables `foods`, `saved_meals`, `recipes`, `recipe_batches`, `food_log_entries`, `body_metrics` (weight only); local `builtin_foods`; `users.preferences.nutrition` |
+| 3.5 | `body_metrics` types beyond weight |
 | 4.1 | progression rule config (per template exercise / per user-exercise) |
 | 5.1 | new `programs` model (weeks/days/sets with % TM, AMRAP, RIR) |
 

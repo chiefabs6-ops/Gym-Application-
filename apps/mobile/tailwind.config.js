@@ -18,6 +18,8 @@ module.exports = {
         // Supersets / circuits (labels A1, A2, links).
         superset: '#60A5FA',
         settype: { warmup: '#FBBF24', drop: '#A78BFA', failure: '#F87171' },
+        // Food tracking macro colours (protein / carbs / fat bars).
+        macro: { protein: '#60A5FA', carbs: '#FBBF24', fat: '#A78BFA' },
       },
       borderRadius: { card: '16px' },
     },

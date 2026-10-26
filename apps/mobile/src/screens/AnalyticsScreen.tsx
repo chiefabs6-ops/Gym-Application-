@@ -1,8 +1,8 @@
 import { ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { volumeTypeSql } from '@gym/shared';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { useUnits } from '../state/settingsStore';
+import { NutritionCharts } from '../components/food/NutritionCharts';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -14,7 +14,8 @@ const COUNTED_SETS = `
   s.is_completed = 1 AND s.set_type <> 'warmup' AND s.weight_kg > 0 AND s.reps > 0 AND ${volumeTypeSql('e')}
   AND s.deleted_at IS NULL AND se.deleted_at IS NULL AND ws.deleted_at IS NULL`;
 
-export default function AnalyticsScreen() {
+/** History → Stats (formerly the Analytics tab). Content only: History owns the safe area and title. */
+export function StatsView() {
   const { data: weekly } = useLiveQuery<{ week: number; volume: number }>(
     `SELECT CAST(ws.start_time / ${WEEK_MS} AS INTEGER) AS week, SUM(s.weight_kg * s.reps) AS volume
      FROM sets s
@@ -46,9 +47,7 @@ export default function AnalyticsScreen() {
   const maxVolume = Math.max(1, ...weekly.map((w) => w.volume));
 
   return (
-    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 24 }}>
-        <Text className="text-2xl font-bold text-ink">Analytics</Text>
+    <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, gap: 24 }}>
 
         <View className="gap-2">
           <Text className="text-sm uppercase tracking-wider text-ink-muted">Weekly volume</Text>
@@ -83,7 +82,7 @@ export default function AnalyticsScreen() {
             </View>
           ))}
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      <NutritionCharts />
+    </ScrollView>
   );
 }

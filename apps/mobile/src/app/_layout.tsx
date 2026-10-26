@@ -15,12 +15,14 @@ import { useRestTimerCues, useRestTimerStore } from '../state/restTimerStore';
 import { useSettingsStore } from '../state/settingsStore';
 import { initSounds } from '../services/sounds';
 import { runAutoBackup } from '../services/backup';
-import { installGlobalErrorLogging } from '../services/crashLog';
+import { installGlobalErrorLogging, recordCrash } from '../services/crashLog';
+import { seedBuiltinFoods } from '../db/repositories/builtinFoods';
 import { CrashScreen } from '../components/CrashScreen';
 import { EffortSheet } from '../components/EffortSheet';
 import { PlateCalculatorSheet } from '../components/PlateCalculatorSheet';
 import { WorkoutNotificationSync } from '../components/WorkoutNotificationSync';
 import { LockScreenMode } from '../components/LockScreenWorkout';
+import { Toast } from '../components/Toast';
 import { colors } from '../theme';
 
 // Expo Go warns that *remote* push isn't supported. We only use local notifications (rest timer),
@@ -50,6 +52,8 @@ async function bootstrap(): Promise<() => void> {
   void configureNotifications().catch(() => undefined);
   void initSounds().catch(() => undefined);
   void runAutoBackup(); // weekly safety net even if no workout was finished
+  // Built-in food list (ROADMAP 2.15): loaded after startup, never blocks or breaks opening the app.
+  void seedBuiltinFoods().catch((e) => recordCrash(e, 'seedBuiltinFoods'));
   if (CLOUD_SYNC_ENABLED) return startSyncManager();
   await clearOutbox(); // offline-only: nothing will ever drain it
   return () => undefined;
@@ -103,6 +107,7 @@ export default function RootLayout() {
       <PlateCalculatorSheet />
       <WorkoutNotificationSync />
       <LockScreenMode />
+      <Toast />
     </KeyboardProvider>
   );
 }

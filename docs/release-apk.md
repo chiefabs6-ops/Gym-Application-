@@ -17,6 +17,11 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk   # -r keep
 - `metro.config.js` switches the server root to the app folder **only for `export:embed`** (release bundling). Don't
   make that unconditional: it breaks the dev server (404 on the bundle).
 - Unneeded permissions are stripped via `android.blockedPermissions` in `app.json`. Check new native deps for added permissions.
+- Food tracking (ROADMAP 2.15) adds native modules `expo-camera` (barcodes + label photo) and
+  `@react-native-ml-kit/text-recognition` (reads the nutrition-table photo on the phone), and the `CAMERA` permission.
+  The `expo-camera` plugin is configured with `recordAudioAndroid: false`; `RECORD_AUDIO` stays in `blockedPermissions`.
+  After the first build with them, check the merged manifest has `CAMERA` and no `RECORD_AUDIO`. Both modules need a
+  prebuild (`npm run phone` does it when `app.json`/`package.json` change); they don't run in Expo Go.
 - Icons/splash: `python apps/mobile/scripts/build-app-icons.py` → `assets/branding/`.
 
 ## Publishing an update (QR code in README)

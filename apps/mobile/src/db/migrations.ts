@@ -152,6 +152,136 @@ const MIGRATIONS: string[] = [
   ALTER TABLE workout_sessions ADD COLUMN plan_day_id TEXT;
   CREATE INDEX idx_sessions_plan_day ON workout_sessions(plan_day_id, end_time);
   `,
+  // v7 (ROADMAP 2.15): food tracking + bodyweight. Foods/batches hold nutrients per 100 g; entries a snapshot.
+  `
+  CREATE TABLE foods (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    brand TEXT,
+    barcode TEXT,
+    source TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT 'g',
+    kcal REAL NOT NULL,
+    protein_g REAL,
+    carbs_g REAL,
+    fat_g REAL,
+    fibre_g REAL,
+    sugars_g REAL,
+    sat_fat_g REAL,
+    salt_g REAL,
+    servings TEXT NOT NULL DEFAULT '[]',
+    archived_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX idx_foods_barcode ON foods(barcode);
+
+  CREATE TABLE saved_meals (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    items TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+
+  CREATE TABLE recipes (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    ingredients TEXT NOT NULL DEFAULT '[]',
+    archived_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+
+  CREATE TABLE recipe_batches (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    recipe_id TEXT NOT NULL,
+    cooked_weight_g REAL NOT NULL,
+    kcal REAL NOT NULL,
+    protein_g REAL,
+    carbs_g REAL,
+    fat_g REAL,
+    fibre_g REAL,
+    sugars_g REAL,
+    sat_fat_g REAL,
+    salt_g REAL,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX idx_batches_open ON recipe_batches(finished_at);
+
+  CREATE TABLE food_log_entries (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    meal TEXT NOT NULL,
+    logged_at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    food_id TEXT,
+    builtin_food_id TEXT,
+    recipe_id TEXT,
+    batch_id TEXT,
+    name TEXT NOT NULL,
+    serving_label TEXT,
+    servings REAL,
+    grams REAL,
+    kcal REAL NOT NULL,
+    protein_g REAL,
+    carbs_g REAL,
+    fat_g REAL,
+    fibre_g REAL,
+    sugars_g REAL,
+    sat_fat_g REAL,
+    salt_g REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX idx_food_log_date ON food_log_entries(local_date, meal);
+  CREATE INDEX idx_food_log_batch ON food_log_entries(batch_id);
+
+  CREATE TABLE body_metrics (
+    id TEXT PRIMARY KEY NOT NULL,
+    user_id TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    measured_at INTEGER NOT NULL,
+    metric TEXT NOT NULL,
+    value REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX idx_body_metrics_date ON body_metrics(local_date);
+
+  -- Bundled CoFID + USDA food list. Local reference data: not synced, not in backups.
+  CREATE TABLE builtin_foods (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    name_search TEXT NOT NULL,
+    source TEXT NOT NULL,
+    basis TEXT NOT NULL DEFAULT 'g',
+    kcal REAL NOT NULL,
+    protein_g REAL,
+    carbs_g REAL,
+    fat_g REAL,
+    fibre_g REAL,
+    sugars_g REAL,
+    sat_fat_g REAL,
+    salt_g REAL,
+    servings TEXT NOT NULL DEFAULT '[]',
+    -- USDA foods: the CoFID food that makes this one a near-duplicate (hidden in search when both match).
+    hidden_by TEXT
+  );
+  `,
 ];
 
 async function seedCanonicalExercises(): Promise<void> {

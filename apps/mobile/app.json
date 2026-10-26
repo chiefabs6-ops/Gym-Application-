@@ -3,7 +3,7 @@
     "name": "Gym Log",
     "slug": "gym-log",
     "scheme": "gymlog",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -11,7 +11,7 @@
     "backgroundColor": "#121214",
     "android": {
       "package": "com.gymlog.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/branding/adaptive-foreground.png",
@@ -21,7 +21,8 @@
       "permissions": [
         "VIBRATE",
         "POST_NOTIFICATIONS",
-        "USE_EXACT_ALARM"
+        "USE_EXACT_ALARM",
+        "CAMERA"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
@@ -58,7 +59,14 @@
         }
       ],
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Gym Log uses the camera to scan food barcodes and nutrition labels.",
+          "recordAudioAndroid": false
+        }
+      ]
     ]
   }
 }

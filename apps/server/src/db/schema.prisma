@@ -61,6 +61,12 @@ model User {
   sets            WorkoutSet[]
   personalRecords PersonalRecord[]
   telemetry       TelemetryPoint[]
+  foods           Food[]
+  savedMeals      SavedMeal[]
+  recipes         Recipe[]
+  recipeBatches   RecipeBatch[]
+  foodLogEntries  FoodLogEntry[]
+  bodyMetrics     BodyMetric[]
 
   @@map("users")
 }
@@ -244,4 +250,152 @@ model TelemetryPoint {
   @@id([sessionId, recordedAt])
   @@index([userId, recordedAt(sort: Desc)])
   @@map("telemetry_points")
+}
+
+// ───────────── Food tracking (ROADMAP 2.15). Text-only until Phase 8 (no migration run). ─────────────
+
+/// Nutrients per 100 g (or 100 ml).
+model Food {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  name          String
+  brand         String?
+  barcode       String?
+  source        String
+  basis         String    @default("g")
+  kcal          Float
+  proteinG      Float?    @map("protein_g")
+  carbsG        Float?    @map("carbs_g")
+  fatG          Float?    @map("fat_g")
+  fibreG        Float?    @map("fibre_g")
+  sugarsG       Float?    @map("sugars_g")
+  satFatG       Float?    @map("sat_fat_g")
+  saltG         Float?    @map("salt_g")
+  servings      Json      @default("[]")
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(3)
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, serverVersion])
+  @@index([userId, barcode])
+  @@map("foods")
+}
+
+model SavedMeal {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  name          String
+  items         Json      @default("[]")
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, serverVersion])
+  @@map("saved_meals")
+}
+
+model Recipe {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  name          String
+  ingredients   Json      @default("[]")
+  archivedAt    DateTime? @map("archived_at") @db.Timestamptz(3)
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user    User          @relation(fields: [userId], references: [id])
+  batches RecipeBatch[]
+
+  @@index([userId, serverVersion])
+  @@map("recipes")
+}
+
+/// Nutrients per 100 g of the cooked dish.
+model RecipeBatch {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  recipeId      String    @map("recipe_id") @db.Uuid
+  cookedWeightG Float     @map("cooked_weight_g")
+  kcal          Float
+  proteinG      Float?    @map("protein_g")
+  carbsG        Float?    @map("carbs_g")
+  fatG          Float?    @map("fat_g")
+  fibreG        Float?    @map("fibre_g")
+  sugarsG       Float?    @map("sugars_g")
+  satFatG       Float?    @map("sat_fat_g")
+  saltG         Float?    @map("salt_g")
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(3)
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id])
+  recipe Recipe @relation(fields: [recipeId], references: [id])
+
+  @@index([userId, serverVersion])
+  @@map("recipe_batches")
+}
+
+/// Absolute nutrient snapshot of what was eaten.
+model FoodLogEntry {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  localDate     String    @map("local_date")
+  meal          String
+  loggedAt      DateTime  @map("logged_at") @db.Timestamptz(3)
+  kind          String
+  foodId        String?   @map("food_id") @db.Uuid
+  builtinFoodId String?   @map("builtin_food_id")
+  recipeId      String?   @map("recipe_id") @db.Uuid
+  batchId       String?   @map("batch_id") @db.Uuid
+  name          String
+  servingLabel  String?   @map("serving_label")
+  servings      Float?
+  grams         Float?
+  kcal          Float
+  proteinG      Float?    @map("protein_g")
+  carbsG        Float?    @map("carbs_g")
+  fatG          Float?    @map("fat_g")
+  fibreG        Float?    @map("fibre_g")
+  sugarsG       Float?    @map("sugars_g")
+  satFatG       Float?    @map("sat_fat_g")
+  saltG         Float?    @map("salt_g")
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, serverVersion])
+  @@index([userId, localDate])
+  @@map("food_log_entries")
+}
+
+model BodyMetric {
+  id            String    @id @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  localDate     String    @map("local_date")
+  measuredAt    DateTime  @map("measured_at") @db.Timestamptz(3)
+  metric        String
+  value         Float
+  serverVersion Int       @default(0) @map("server_version")
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, serverVersion])
+  @@map("body_metrics")
 }

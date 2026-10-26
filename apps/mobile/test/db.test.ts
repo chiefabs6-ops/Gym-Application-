@@ -15,7 +15,7 @@ beforeEach(async () => {
 describe('migrations', () => {
   it('creates the schema and seeds every canonical exercise', async () => {
     const v = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-    expect(v?.user_version).toBe(6);
+    expect(v?.user_version).toBe(7);
     const n = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM exercise_definitions');
     expect(n?.n).toBe(DEFAULT_EXERCISES.length);
   });
@@ -36,6 +36,8 @@ describe('migrations', () => {
       ALTER TABLE workout_sessions DROP COLUMN plan_day_id;
       UPDATE exercise_definitions SET name = 'Triceps Pushdown (Cable)' WHERE id = '00000000-0000-4000-8000-000000000013';
       DELETE FROM exercise_definitions WHERE id = '00000000-0000-4000-8000-000000000044';
+      DROP TABLE foods; DROP TABLE saved_meals; DROP TABLE recipes; DROP TABLE recipe_batches;
+      DROP TABLE food_log_entries; DROP TABLE body_metrics; DROP TABLE builtin_foods;
       PRAGMA user_version = 1;
     `);
     await initDatabase();
@@ -48,6 +50,17 @@ describe('migrations', () => {
       tracking_type: 'weighted_bodyweight',
     });
     expect(await getRecord('exercise_definitions', '00000000-0000-4000-8000-000000000022')).toMatchObject({ tracking_type: 'duration' });
+  });
+
+  it('v7 food tables accept rows through mutate.ts', async () => {
+    const f = await createRecord('foods', { user_id: userId, name: 'Oats', brand: null, barcode: null, source: 'custom', basis: 'g',
+      kcal: 375, protein_g: 11, carbs_g: 60, fat_g: 8, fibre_g: 9, sugars_g: 1, sat_fat_g: 1.5, salt_g: 0, servings: [{ label: '1 bowl', grams: 60 }], archived_at: null });
+    expect(await getRecord('foods', f.id)).toMatchObject({ name: 'Oats', servings: [{ label: '1 bowl', grams: 60 }] });
+    await createRecord('food_log_entries', { user_id: userId, local_date: '2026-10-26', meal: 'breakfast', logged_at: Date.now(), kind: 'quick',
+      food_id: null, builtin_food_id: null, recipe_id: null, batch_id: null, name: 'Cafe lunch', serving_label: null, servings: null, grams: null,
+      kcal: 650, protein_g: 30, carbs_g: null, fat_g: null, fibre_g: null, sugars_g: null, sat_fat_g: null, salt_g: null });
+    const n = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM food_log_entries WHERE deleted_at IS NULL');
+    expect(n?.n).toBe(1);
   });
 
   it('is safe to run again (no duplicate seed rows, version unchanged)', async () => {

@@ -141,7 +141,8 @@ export default function SettingsScreen() {
               <View className="flex-row items-center gap-2">
                 <WifiOff size={14} color={colors.accent} />
                 <Text className="flex-1 text-sm text-ink-muted">
-                  Works fully offline. No account needed; your data stays on this phone.
+                  Works offline. No account needed; your data stays on this phone. Online food search and barcode
+                  lookups use Open Food Facts.
                 </Text>
               </View>
             )}
@@ -149,6 +150,15 @@ export default function SettingsScreen() {
             <ErrorReportsRow />
             <Text className="text-[11px] leading-4 text-ink-faint">
               Exercise illustrations: exercise data by RepDB (repdb.co), recoloured.
+            </Text>
+            <Text className="text-[11px] leading-4 text-ink-faint">
+              Built-in foods: UK CoFID (McCance and Widdowson's Composition of Foods Integrated Dataset 2021), contains
+              public sector information licensed under the Open Government Licence v3.0; and USDA FoodData Central
+              (public domain).
+            </Text>
+            <Text className="text-[11px] leading-4 text-ink-faint">
+              Online products contain data from Open Food Facts (openfoodfacts.org), available under the Open Database
+              License (ODbL).
             </Text>
           </View>
         </SettingsCard>

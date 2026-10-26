@@ -8,6 +8,12 @@ export const PRISMA_MODEL: Record<SyncTable, string> = {
   workout_sessions: 'workoutSession',
   session_exercises: 'sessionExercise',
   sets: 'workoutSet',
+  foods: 'food',
+  saved_meals: 'savedMeal',
+  recipes: 'recipe',
+  recipe_batches: 'recipeBatch',
+  food_log_entries: 'foodLogEntry',
+  body_metrics: 'bodyMetric',
 };
 
 const snakeToCamel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());

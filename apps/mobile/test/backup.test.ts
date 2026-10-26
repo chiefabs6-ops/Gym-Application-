@@ -4,7 +4,8 @@ import { Directory, File, resetFileSystem } from './mocks/expoFileSystem';
 import { shared } from './mocks/expoSharing';
 import { getMeta, setMeta } from '../src/db/meta';
 import { getLocalUser } from '../src/db/repositories/user';
-import { buildBackup, needsBackupReminder, pickBackupFile, restoreBackup, runAutoBackup, shareWorkoutsCsv } from '../src/services/backup';
+import { buildBackup, needsBackupReminder, pickBackupFile, restoreBackup, runAutoBackup, shareWorkoutsCsv, summarize } from '../src/services/backup';
+import { createRecord } from '../src/db/mutate';
 import { useSettingsStore } from '../src/state/settingsStore';
 import { BENCH, SQUAT, freshApp, logWorkout, rows } from './helpers';
 
@@ -38,6 +39,23 @@ describe('backup → wipe → restore', () => {
     const after = await snapshot();
     const reowned = JSON.parse(JSON.stringify(before).replaceAll(oldUser, newUser));
     expect(after).toEqual(reowned);
+  });
+
+  it('restores food, food log entries and weigh-ins, re-owned by the new user, and counts them', async () => {
+    const userId = (await getLocalUser())!.id;
+    const food = await createRecord('foods', { user_id: userId, name: 'Oats', brand: null, barcode: '5000000000001', source: 'custom', basis: 'g',
+      kcal: 375, protein_g: 11, carbs_g: 60, fat_g: 8, fibre_g: null, sugars_g: null, sat_fat_g: null, salt_g: null, servings: [{ label: '1 bowl', grams: 60 }], archived_at: null });
+    await createRecord('food_log_entries', { user_id: userId, local_date: '2026-10-26', meal: 'breakfast', logged_at: 1, kind: 'food',
+      food_id: food.id, builtin_food_id: null, recipe_id: null, batch_id: null, name: 'Oats', serving_label: '1 bowl', servings: 1, grams: 60,
+      kcal: 225, protein_g: 6.6, carbs_g: 36, fat_g: 4.8, fibre_g: null, sugars_g: null, sat_fat_g: null, salt_g: null });
+    await createRecord('body_metrics', { user_id: userId, local_date: '2026-10-26', measured_at: 1, metric: 'weight', value: 80.4 });
+    const before = await snapshot();
+    const backup = await buildBackup();
+    expect(summarize(backup)).toMatchObject({ foodEntries: 1, foods: 1, weighIns: 1 });
+
+    const newUser = await freshApp();
+    await restoreBackup(backup);
+    expect(await snapshot()).toEqual(JSON.parse(JSON.stringify(before).replaceAll(userId, newUser)));
   });
 
   it('restoring the same backup twice changes nothing the second time', async () => {

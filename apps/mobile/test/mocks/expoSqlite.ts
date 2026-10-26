@@ -29,6 +29,16 @@ export class TestSQLiteDatabase {
   async getAllAsync<T>(sql: string, params?: SQLiteBindValue[]): Promise<T[]> {
     return this.raw.prepare(sql).all(...bind(params)).map((r) => plain<T>(r));
   }
+  async prepareAsync(sql: string) {
+    const stmt = this.raw.prepare(sql);
+    return {
+      async executeAsync(params?: SQLiteBindValue[]) {
+        const r = stmt.run(...bind(params));
+        return { changes: Number(r.changes), lastInsertRowId: Number(r.lastInsertRowid) };
+      },
+      async finalizeAsync() {},
+    };
+  }
   async withTransactionAsync(fn: () => Promise<void>): Promise<void> {
     if (this.inTransaction) throw new Error('test adapter: nested/concurrent transaction');
     this.inTransaction = true;

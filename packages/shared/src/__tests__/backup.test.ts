@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_FORMAT, BACKUP_VERSION, buildWorkoutCsv, csvEscape, parseBackup, type BackupTables } from '../backup';
+import { BACKUP_FORMAT, BACKUP_VERSION, buildWorkoutCsv, csvEscape, parseBackup, skippedDataMessage, type BackupTables } from '../backup';
 
 const U = '11111111-1111-4111-8111-111111111111';
 const S1 = '22222222-2222-4222-8222-222222222222';
@@ -33,6 +33,12 @@ function tables(): BackupTables {
   return {
     users: [],
     workout_templates: [],
+    foods: [],
+    saved_meals: [],
+    recipes: [],
+    recipe_batches: [],
+    food_log_entries: [],
+    body_metrics: [],
     exercise_definitions: [
       { ...base, id: EX_BENCH, user_id: null, name: 'Bench Press (Barbell)', primary_muscle: 'chest', equipment: 'barbell', category: 'strength', archived_at: null, tracking_type: 'weight_reps' as const },
       { ...base, id: EX_ROW, user_id: null, name: 'Row, "heavy"', primary_muscle: 'back', equipment: 'barbell', category: 'strength', archived_at: null, tracking_type: 'weight_reps' as const },
@@ -106,5 +112,24 @@ describe('parseBackup', () => {
     });
     const damaged = { ...valid, tables: { ...valid.tables, sets: [{ ...valid.tables.sets[0], reps: 'ten' }] } };
     expect(parseBackup(JSON.stringify(damaged))).toMatchObject({ ok: false, error: expect.stringContaining('damaged') });
+  });
+
+  it('reports tables it does not know and still parses the rest', () => {
+    const file = { ...valid, tables: { ...valid.tables, meal_plans: [{ id: 'x' }] } };
+    const r = parseBackup(JSON.stringify(file));
+    expect(r.ok && r.skippedTables).toEqual(['meal_plans']);
+    expect(r.ok && r.backup.tables.sets).toHaveLength(4);
+    expect(skippedDataMessage(['meal_plans'])).toBe(
+      'Some data (meal_plans) was skipped because this backup is from a newer app version. Update the app to restore it.',
+    );
+    expect(skippedDataMessage([])).toBeNull();
+  });
+
+  it('parses an old backup that has no food tables', () => {
+    const old = JSON.parse(JSON.stringify(valid));
+    for (const t of ['foods', 'saved_meals', 'recipes', 'recipe_batches', 'food_log_entries', 'body_metrics']) delete old.tables[t];
+    const r = parseBackup(JSON.stringify(old));
+    expect(r.ok && r.backup.tables.food_log_entries).toEqual([]);
+    expect(r.ok && r.skippedTables).toEqual([]);
   });
 });

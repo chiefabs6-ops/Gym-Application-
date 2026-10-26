@@ -28,3 +28,9 @@ apps/mobile/assets/exercises/*.png
 
 # Stray scratch file
 test.text
+
+# Downloaded datasets for scripts/build-food-db.py (CoFID Excel, USDA CSVs) and its duplicate report
+apps/mobile/scripts/food-data/
+
+# Brainstorm mockups and plan-execution work files (superpowers skills)
+.superpowers/

@@ -14,3 +14,7 @@ export * from './plates';
 export * from './warmups';
 export * from './intervals';
 export * from './plans';
+export * from './nutrition';
+export * from './targets';
+export * from './labelParser';
+export * from './foodForm';

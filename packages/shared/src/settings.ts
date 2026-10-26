@@ -3,6 +3,7 @@ import { KG_PER_LB, type UnitSystem } from './domain';
 import { EFFORT_INPUTS } from './effort';
 import { plateProfileSchema } from './plates';
 import { trainingPlanSchema } from './plans';
+import { nutritionSettingsSchema } from './targets';
 
 /**
  * User settings stored in `users.preferences` (JSON). Units live in the `users.unit_system` column.
@@ -45,6 +46,8 @@ export const settingsSchema = z.object({
   lock_screen_mode: z.boolean().catch(true),
   /** Training split run as a rotation (see plans.ts). null = no plan. */
   training_plan: trainingPlanSchema.nullable().catch(null),
+  /** Food tracking: body profile, goal, hand-edited targets and target history (see targets.ts). null = not set up. */
+  nutrition: nutritionSettingsSchema.nullable().catch(null),
 });
 
 export type AppSettings = z.infer<typeof settingsSchema>;

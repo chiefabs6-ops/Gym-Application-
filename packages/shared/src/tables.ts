@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EQUIPMENT, EXERCISE_CATEGORIES, MUSCLE_GROUPS, SET_TYPES, UNIT_SYSTEMS } from './domain';
 import { TRACKING_TYPES } from './tracking';
+import { MEALS, nutrientsSchema, servingSchema } from './nutrition';
 
 /**
  * Wire format for every synced row. Column names are snake_case and identical in
@@ -126,6 +127,103 @@ export const setRowSchema = z.object({
   notes: z.string().max(500).nullable().default(null),
 });
 
+/* ───────────────────────────── Food tracking (ROADMAP 2.15) ─────────────────────────────
+ * Foods and batches store nutrients PER 100 g (or 100 ml); log entries store an absolute snapshot, so editing a
+ * food or recipe never changes past days. Unknown nutrient values are null, never 0.
+ */
+const nutrientColumns = nutrientsSchema.shape;
+const builtinFoodId = z.string().min(1).max(40);
+const localDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const FOOD_SOURCES = ['custom', 'label', 'open_food_facts'] as const;
+export const FOOD_BASES = ['g', 'ml'] as const;
+export const LOG_ENTRY_KINDS = ['food', 'builtin', 'recipe', 'batch', 'quick'] as const;
+
+export const foodRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  name: z.string().min(1).max(120),
+  brand: z.string().max(120).nullable(),
+  barcode: z.string().max(32).nullable(),
+  source: z.enum(FOOD_SOURCES),
+  basis: z.enum(FOOD_BASES),
+  ...nutrientColumns,
+  servings: z.array(servingSchema).max(20),
+  archived_at: epochMs.nullable(),
+});
+
+/** A food inside a saved meal or recipe, with its per-100 values captured when it was added. */
+export const mealItemSchema = z.object({
+  name: z.string().min(1).max(120),
+  food_id: uuid.nullable(),
+  builtin_food_id: builtinFoodId.nullable(),
+  serving_label: z.string().min(1).max(60),
+  servings: z.number().positive().max(1000),
+  grams: z.number().positive().max(50_000),
+  per100: nutrientsSchema,
+});
+export const recipeIngredientSchema = z.object({
+  name: z.string().min(1).max(120),
+  food_id: uuid.nullable(),
+  builtin_food_id: builtinFoodId.nullable(),
+  grams: z.number().positive().max(50_000),
+  per100: nutrientsSchema,
+});
+
+export const savedMealRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  name: z.string().min(1).max(120),
+  items: z.array(mealItemSchema).min(1).max(50),
+});
+
+export const recipeRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  name: z.string().min(1).max(120),
+  ingredients: z.array(recipeIngredientSchema).min(1).max(100),
+  archived_at: epochMs.nullable(),
+});
+
+/** One cooking of a recipe. Nutrients are per 100 g of the cooked dish. Leftovers = cooked weight − logged grams. */
+export const recipeBatchRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  recipe_id: uuid,
+  cooked_weight_g: z.number().positive().max(50_000),
+  ...nutrientColumns,
+  finished_at: epochMs.nullable(),
+});
+
+export const foodLogEntryRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  local_date: localDate,
+  meal: z.enum(MEALS),
+  logged_at: epochMs,
+  kind: z.enum(LOG_ENTRY_KINDS),
+  food_id: uuid.nullable(),
+  builtin_food_id: builtinFoodId.nullable(),
+  recipe_id: uuid.nullable(),
+  batch_id: uuid.nullable(),
+  name: z.string().min(1).max(120),
+  serving_label: z.string().min(1).max(60).nullable(),
+  servings: z.number().positive().max(1000).nullable(),
+  grams: z.number().positive().max(50_000).nullable(),
+  ...nutrientColumns,
+});
+
+export const BODY_METRICS = ['weight'] as const;
+export const bodyMetricRowSchema = z.object({
+  ...syncColumns,
+  user_id: uuid,
+  local_date: localDate,
+  measured_at: epochMs,
+  metric: z.enum(BODY_METRICS),
+  /** Weight in kg. */
+  value: z.number().min(20).max(400),
+});
+
 export type UserRow = z.infer<typeof userRowSchema>;
 export type ExerciseDefinitionRow = z.infer<typeof exerciseDefinitionRowSchema>;
 export type TemplateExercise = z.infer<typeof templateExerciseSchema>;
@@ -134,6 +232,14 @@ export type WorkoutTemplateRow = z.infer<typeof workoutTemplateRowSchema>;
 export type WorkoutSessionRow = z.infer<typeof workoutSessionRowSchema>;
 export type SessionExerciseRow = z.infer<typeof sessionExerciseRowSchema>;
 export type SetRow = z.infer<typeof setRowSchema>;
+export type FoodRow = z.infer<typeof foodRowSchema>;
+export type MealItem = z.infer<typeof mealItemSchema>;
+export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
+export type SavedMealRow = z.infer<typeof savedMealRowSchema>;
+export type RecipeRow = z.infer<typeof recipeRowSchema>;
+export type RecipeBatchRow = z.infer<typeof recipeBatchRowSchema>;
+export type FoodLogEntryRow = z.infer<typeof foodLogEntryRowSchema>;
+export type BodyMetricRow = z.infer<typeof bodyMetricRowSchema>;
 
 /** Ordered parent-first: pull results are applied in this order. */
 export const SYNC_TABLES = [
@@ -143,6 +249,12 @@ export const SYNC_TABLES = [
   'workout_sessions',
   'session_exercises',
   'sets',
+  'foods',
+  'saved_meals',
+  'recipes',
+  'recipe_batches',
+  'food_log_entries',
+  'body_metrics',
 ] as const;
 export type SyncTable = (typeof SYNC_TABLES)[number];
 
@@ -153,6 +265,12 @@ export interface SyncRowMap {
   workout_sessions: WorkoutSessionRow;
   session_exercises: SessionExerciseRow;
   sets: SetRow;
+  foods: FoodRow;
+  saved_meals: SavedMealRow;
+  recipes: RecipeRow;
+  recipe_batches: RecipeBatchRow;
+  food_log_entries: FoodLogEntryRow;
+  body_metrics: BodyMetricRow;
 }
 export type SyncRow<T extends SyncTable> = SyncRowMap[T];
 
@@ -241,6 +359,64 @@ export const TABLE_SPECS: Record<SyncTable, TableSpec> = {
     refs: [{ column: 'session_exercise_id', table: 'session_exercises' }],
     timestampColumns: [...BASE_TS, 'completed_at'],
     booleanColumns: ['is_completed'],
+    jsonColumns: [],
+  },
+  foods: {
+    schema: foodRowSchema,
+    strategy: 'lww',
+    ownerColumn: 'user_id',
+    refs: [],
+    timestampColumns: [...BASE_TS, 'archived_at'],
+    booleanColumns: [],
+    jsonColumns: ['servings'],
+  },
+  saved_meals: {
+    schema: savedMealRowSchema,
+    strategy: 'lww',
+    ownerColumn: 'user_id',
+    refs: [],
+    timestampColumns: BASE_TS,
+    booleanColumns: [],
+    jsonColumns: ['items'],
+  },
+  recipes: {
+    schema: recipeRowSchema,
+    strategy: 'lww',
+    ownerColumn: 'user_id',
+    refs: [],
+    timestampColumns: [...BASE_TS, 'archived_at'],
+    booleanColumns: [],
+    jsonColumns: ['ingredients'],
+  },
+  recipe_batches: {
+    schema: recipeBatchRowSchema,
+    strategy: 'lww',
+    ownerColumn: 'user_id',
+    refs: [{ column: 'recipe_id', table: 'recipes' }],
+    timestampColumns: [...BASE_TS, 'finished_at'],
+    booleanColumns: [],
+    jsonColumns: [],
+  },
+  food_log_entries: {
+    schema: foodLogEntryRowSchema,
+    strategy: 'append_only',
+    ownerColumn: 'user_id',
+    refs: [
+      { column: 'food_id', table: 'foods', nullable: true },
+      { column: 'recipe_id', table: 'recipes', nullable: true },
+      { column: 'batch_id', table: 'recipe_batches', nullable: true },
+    ],
+    timestampColumns: [...BASE_TS, 'logged_at'],
+    booleanColumns: [],
+    jsonColumns: [],
+  },
+  body_metrics: {
+    schema: bodyMetricRowSchema,
+    strategy: 'append_only',
+    ownerColumn: 'user_id',
+    refs: [],
+    timestampColumns: [...BASE_TS, 'measured_at'],
+    booleanColumns: [],
     jsonColumns: [],
   },
 };

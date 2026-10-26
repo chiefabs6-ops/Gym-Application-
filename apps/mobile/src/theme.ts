@@ -17,6 +17,9 @@ export const colors = {
   warmup: '#FBBF24',
   drop: '#A78BFA',
   failure: '#F87171',
+  protein: '#60A5FA',
+  carbs: '#FBBF24',
+  fat: '#A78BFA',
 } as const;
 
 /** Soft drop shadow for floating cards (Android elevation + iOS shadow). */

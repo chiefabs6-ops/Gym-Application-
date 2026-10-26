@@ -110,9 +110,12 @@ export interface BackupSummary {
   sets: number;
   routines: number;
   customExercises: number;
+  foodEntries: number;
+  foods: number;
+  weighIns: number;
 }
 
-export type PickResult = { ok: true; backup: BackupFile; summary: BackupSummary } | { ok: false; error: string } | { ok: false; cancelled: true };
+export type PickResult = { ok: true; backup: BackupFile; summary: BackupSummary; skippedTables: string[] } | { ok: false; error: string } | { ok: false; cancelled: true };
 
 export function summarize(backup: BackupFile): BackupSummary {
   const live = <T extends { deleted_at: number | null }>(rows: T[]) => rows.filter((r) => r.deleted_at === null);
@@ -123,6 +126,9 @@ export function summarize(backup: BackupFile): BackupSummary {
     sets: live(backup.tables.sets).filter((s) => s.is_completed).length,
     routines: live(backup.tables.workout_templates).length,
     customExercises: live(backup.tables.exercise_definitions).filter((e) => e.user_id !== null).length,
+    foodEntries: live(backup.tables.food_log_entries).length,
+    foods: live(backup.tables.foods).length,
+    weighIns: live(backup.tables.body_metrics).length,
   };
 }
 
@@ -138,7 +144,7 @@ export async function pickBackupFile(): Promise<PickResult> {
   if (!file) return { ok: false, cancelled: true };
   const result = parseBackup(await file.text());
   if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, backup: result.backup, summary: summarize(result.backup) };
+  return { ok: true, backup: result.backup, summary: summarize(result.backup), skippedTables: result.skippedTables };
 }
 
 export interface RestoreStats {

@@ -13,6 +13,8 @@ packages/shared  Wire schemas (zod), sync protocol, conflict resolution, Epley/P
 checklist, and tick items (with date) only after verifying them on the emulator/device.
 **Current scope (2026-10-07): offline-only on the phone.** Do not start server/database/account work (`apps/server`,
 Docker, sync enablement); it is deferred to ROADMAP Phase 8. Keep the existing sync code intact but unused.
+**Exception (2026-10-26, ROADMAP 2.15):** food search and barcode lookup use Open Food Facts online; anything fetched
+is saved on the phone. Everything else (built-in foods, diary, targets, weight) stays offline.
 
 ## More docs (read only when relevant)
 - `docs/release-apk.md`: building and installing the release APK on the phone (JAVA_HOME, prebuild, keystore, metro quirk, permissions, icons).
@@ -55,6 +57,8 @@ Docker, sync enablement); it is deferred to ROADMAP Phase 8. Keep the existing s
 - Weights are stored in kg only. Convert at the UI boundary with `useUnits()` (`src/state/settingsStore.ts`);
   never show a hard-coded "kg". User settings live in the `users` row (`unit_system` + `preferences`, see
   `packages/shared/src/settings.ts`) and are read synchronously via `getSettings()` / `useSettingsStore`.
+- Food amounts are stored in grams and energy in kcal (kcal only, no kJ display). Foods store nutrients **per 100 g**;
+  log entries store an absolute **snapshot**, so editing a food or recipe never changes past days.
 
 ### 3. Sync (deferred, see `docs/server-and-sync.md`)
 - Conflict rules live in **one function**, `resolveWrite()` in `packages/shared/src/sync.ts`, shared by client and server.
@@ -75,6 +79,14 @@ Docker, sync enablement); it is deferred to ROADMAP Phase 8. Keep the existing s
   `setMetrics()`. Volume only counts `countsTowardVolume` types (`volumeTypeSql` for SQL).
   Warmups and empty sets never count; no badge if there's no prior history.
 
+### 4b. Food tracking (ROADMAP 2.15, spec `docs/superpowers/specs/2026-10-25-food-tracking-design.md`)
+- Pure maths lives in `packages/shared/src/nutrition.ts` (scaling, units, day keys) and `targets.ts`
+  (Mifflin-St Jeor, macro split, minimums). Targets and body profile live in `users.preferences.nutrition`.
+- `builtin_foods` is a **local, non-synced** reference table (bundled CoFID + USDA list), not in backups; it is
+  reloaded only when the bundled list version changes.
+- Batch leftovers are calculated (cooked weight − logged grams), never stored, so editing/deleting an entry puts the
+  amount back.
+
 ### 5. Generated assets (don't hand-edit outputs)
 - Rest-timer beeps: `node apps/mobile/scripts/generate-beeps.mjs` → `apps/mobile/assets/sounds/*.wav`.
 - Exercise illustrations: `python apps/mobile/scripts/build-exercise-images.py` (needs Pillow, numpy, scipy) →
@@ -82,6 +94,10 @@ Docker, sync enablement); it is deferred to ROADMAP Phase 8. Keep the existing s
   Source: RepDB free tier (in-app use with attribution). Keep the "Exercise data by RepDB (repdb.co)" credit in the
   form guide and Settings screen, and keep `assets/exercises/LICENSE.md`. Never publish the images as a dataset and
   never run them through generative AI (licence terms). Do not add images from sites without a licence that allows app use.
+- Built-in foods: `python apps/mobile/scripts/build-food-db.py` (needs openpyxl; datasets downloaded into the
+  git-ignored `apps/mobile/scripts/food-data/`, see the script header) → `apps/mobile/assets/foods/builtin-foods.json`.
+  CoFID (OGL v3) is the main source; USDA FoodData Central (CC0) fills gaps; near-duplicates get `hidden_by`.
+  Keep the attributions in `assets/foods/SOURCES.md` and in Settings. Ids (`cofid:<code>`, `usda:<fdc_id>`) never change.
 - Form tips: `packages/shared/src/formGuides.ts`; a test enforces a guide for every canonical exercise.
 - Canonical exercises: never change an id; adding/renaming one needs a form guide (test-enforced) and an entry in
   `build-exercise-images.py`. The on-device seed upserts canonical rows at every launch, so renames reach old installs.

@@ -25,7 +25,7 @@ import {
   type BackupSummary,
   type RestoreStats,
 } from '../services/backup';
-import type { BackupFile } from '@gym/shared';
+import { skippedDataMessage, type BackupFile } from '@gym/shared';
 import { useActiveWorkoutStore } from '../state/activeWorkoutStore';
 import { useSettingsStore } from '../state/settingsStore';
 import { colors } from '../theme';
@@ -48,7 +48,7 @@ export function BackupSection() {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ backup: BackupFile; summary: BackupSummary } | null>(null);
+  const [pending, setPending] = useState<{ backup: BackupFile; summary: BackupSummary; skippedTables: string[] } | null>(null);
   const [result, setResult] = useState<RestoreStats | null>(null);
   const activeSession = useActiveWorkoutStore((s) => s.sessionId);
   const [open, setOpen] = useState(false);
@@ -168,7 +168,7 @@ export function BackupSection() {
         onPress={() =>
           void run('pick', async () => {
             const picked = await pickBackupFile();
-            if (picked.ok) setPending({ backup: picked.backup, summary: picked.summary });
+            if (picked.ok) setPending({ backup: picked.backup, summary: picked.summary, skippedTables: picked.skippedTables });
             else if ('error' in picked) setError(picked.error);
           })
         }
@@ -251,13 +251,14 @@ function RestoreSheet({
   onCancel,
   onConfirm,
 }: {
-  pending: { summary: BackupSummary } | null;
+  pending: { summary: BackupSummary; skippedTables: string[] } | null;
   result: RestoreStats | null;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const s = pending?.summary;
+  const skipped = skippedDataMessage(pending?.skippedTables ?? []);
   return (
     <BottomSheet visible={pending !== null} animationType="slide" onClose={onCancel} dismissable={!busy} className="px-5 pb-8 pt-3">
       <View className="mb-4 h-1 w-10 self-center rounded-full bg-surface-border" />
@@ -270,6 +271,7 @@ function RestoreSheet({
           <Text className="text-center text-sm text-ink-subtle">
             {result.added} added · {result.updated} updated · {result.unchanged} already up to date
           </Text>
+          {skipped && <Text className="text-center text-sm text-pr">{skipped}</Text>}
           <Pressable onPress={onCancel} className="mt-2 h-12 w-full items-center justify-center rounded-xl bg-accent">
             <Text className="font-bold text-surface">Done</Text>
           </Pressable>
@@ -287,6 +289,13 @@ function RestoreSheet({
               <Stat label="Routines" value={s.routines} />
               <Stat label="Custom ex." value={s.customExercises} />
             </View>
+            {(s.foodEntries > 0 || s.foods > 0 || s.weighIns > 0) && (
+              <View className="mb-4 flex-row gap-2">
+                <Stat label="Food logs" value={s.foodEntries} />
+                <Stat label="Foods" value={s.foods} />
+                <Stat label="Weigh-ins" value={s.weighIns} />
+              </View>
+            )}
             <View className="mb-5 rounded-xl bg-surface-elevated p-3">
               <Text className="text-sm leading-5 text-ink-muted">
                 The backup is <Text className="font-semibold text-ink">merged</Text> into this phone. Nothing is
