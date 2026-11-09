@@ -142,7 +142,8 @@ export const useActiveWorkoutStore = create<ActiveWorkoutState>()(
       },
 
       completeSet: async (setId, restSeconds) => {
-        const { sessionId } = get();
+        // The page on screen when the set was ticked: a swipe after this cancels the auto-advance below.
+        const { sessionId, currentIndex: fromIndex } = get();
         if (!sessionId) return;
         // LEFT JOIN: exercises without sets still count, so indexes match the workout pager.
         const rows = await db.getAllAsync<{ se_id: string; g: string | null; set_id: string | null; done: number | null }>(
@@ -165,7 +166,6 @@ export const useActiveWorkoutStore = create<ActiveWorkoutState>()(
         // after a finished one) slides in. Skipped if the user moved or unticked the set in the meantime.
         if (flow.nextIndex !== null) {
           const next = flow.nextIndex;
-          const fromIndex = get().currentIndex;
           setTimeout(() => {
             if (get().sessionId !== sessionId || get().currentIndex !== fromIndex) return;
             void db
