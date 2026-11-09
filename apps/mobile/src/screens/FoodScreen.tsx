@@ -146,18 +146,26 @@ export default function FoodScreen() {
         />
 
         <View className="rounded-card bg-surface-raised">
-          <View className="flex-row items-center justify-between px-4 pb-2 pt-3">
-            <Text className="font-semibold text-ink">{MEAL_LABELS[meal]}</Text>
-            <View className="flex-row items-center gap-3">
-              <Text className="text-xs tabular-nums text-ink-muted">
+          <View className="flex-row items-center gap-2 pb-2 pl-4 pr-3 pt-2.5">
+            <Text className="flex-1 font-semibold text-ink" numberOfLines={1}>
+              {MEAL_LABELS[meal]}
+              {'  '}
+              <Text className="text-xs font-normal tabular-nums text-ink-muted">
                 {n0(mealTotals.kcal)} kcal · <Text className="text-macro-protein">{n0(mealTotals.protein_g)} g protein</Text>
               </Text>
-              {mealEntries.length > 0 && (
-                <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel={`${MEAL_LABELS[meal]} options`}>
-                  <MoreHorizontal size={20} color={colors.muted} />
-                </Pressable>
-              )}
-            </View>
+            </Text>
+            {mealEntries.length > 0 && (
+              <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} className="px-1.5" accessibilityLabel={`${MEAL_LABELS[meal]} options`}>
+                <MoreHorizontal size={20} color={colors.muted} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => router.push({ pathname: '/food/add', params: { meal, date } })}
+              className="h-9 w-9 items-center justify-center rounded-full bg-accent-soft active:opacity-70"
+              accessibilityLabel={`Add food to ${MEAL_LABELS[meal]}`}
+            >
+              <Plus size={16} color={colors.accent} strokeWidth={2.5} />
+            </Pressable>
           </View>
           {mealEntries.map((e) => (
             <Pressable
@@ -176,13 +184,6 @@ export default function FoodScreen() {
               <Text className="tabular-nums text-ink">{n0(e.kcal)}</Text>
             </Pressable>
           ))}
-          <Pressable
-            onPress={() => router.push({ pathname: '/food/add', params: { meal, date } })}
-            className="flex-row items-center gap-2 border-t border-surface-border px-4 py-3 active:bg-surface-elevated"
-          >
-            <Plus size={16} color={colors.accent} />
-            <Text className="font-semibold text-accent">Add food</Text>
-          </Pressable>
         </View>
       </ScrollView>
 

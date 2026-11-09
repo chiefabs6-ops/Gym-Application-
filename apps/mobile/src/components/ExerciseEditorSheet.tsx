@@ -19,6 +19,7 @@ import {
   setExerciseArchived,
   updateExercise,
 } from '../db/repositories/exercises';
+import { useUnits } from '../state/settingsStore';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 
@@ -44,15 +45,16 @@ interface Props {
 }
 
 const label = (s: string) => s.replace('_', ' ');
-/** One-line examples so the type choice is obvious. */
-const TRACKING_HINTS: Record<TrackingType, string> = {
-  weight_reps: 'e.g. 60 kg × 10',
-  reps_only: 'e.g. 15 reps, no weight',
-  weighted_bodyweight: 'e.g. pull-ups, +10 kg optional',
-  assisted_bodyweight: 'e.g. assisted pull-up, −20 kg',
-  duration: 'e.g. plank 1:30, with a stopwatch',
-  distance_duration: 'e.g. run 5 km in 25:00',
-};
+/** One example per type, shown on its tile so the choice is obvious (weights in the user's unit). */
+const trackingExample = (t: TrackingType, kg: string, km: string): string =>
+  ({
+    weight_reps: `60 ${kg} × 10`,
+    reps_only: '15 reps',
+    weighted_bodyweight: `Pull-up +10 ${kg} × 8`,
+    assisted_bodyweight: `Pull-up −20 ${kg} × 8`,
+    duration: 'Plank 1:30',
+    distance_duration: `Run 5 ${km} in 25:00`,
+  })[t];
 
 /** Create or edit a custom exercise: name, primary muscle, equipment, type; archive / restore. */
 export function ExerciseEditorSheet({ target, onClose, onSaved }: Props) {
@@ -139,15 +141,15 @@ export function ExerciseEditorSheet({ target, onClose, onSaved }: Props) {
           {clash ? `“${clash}” already exists. Pick another name.` : 'Tip: add the equipment, e.g. “Row (T-Bar)”.'}
         </Text>
 
+        <SectionLabel text="How it's logged" />
+        <TrackingTiles value={tracking} onChange={setTracking} />
+
         <SectionLabel text="Primary muscle" />
         <Chips options={MUSCLE_GROUPS} value={muscle} format={label} onChange={setMuscle} />
 
         <SectionLabel text="Equipment" />
         <Chips options={EQUIPMENT} value={equipment} format={label} onChange={setEquipment} />
 
-        <SectionLabel text="How it's logged" />
-        <Chips options={TRACKING_TYPES} value={tracking} format={(t) => TRACKING_LABELS[t]} onChange={setTracking} />
-        <Text className="-mt-2 mb-4 text-xs text-ink-faint">{TRACKING_HINTS[tracking]}</Text>
 
         <Pressable
           onPress={() => void save()}
@@ -183,6 +185,33 @@ export function ExerciseEditorSheet({ target, onClose, onSaved }: Props) {
         )}
       </ScrollView>
     </BottomSheet>
+  );
+}
+
+/** The logging types as a 2-column grid of tiles, each with an example of what a set looks like. */
+function TrackingTiles({ value, onChange }: { value: TrackingType; onChange: (t: TrackingType) => void }) {
+  const units = useUnits();
+  return (
+    <View className="mb-4 flex-row flex-wrap gap-2" accessibilityRole="radiogroup">
+      {TRACKING_TYPES.map((t) => {
+        const active = t === value;
+        return (
+          <Pressable
+            key={t}
+            onPress={() => onChange(t)}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: active }}
+            style={{ flexBasis: '47%', flexGrow: 1 }}
+            className={`gap-0.5 rounded-[14px] border px-3 py-2.5 ${active ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-elevated'}`}
+          >
+            <Text className={`text-sm font-semibold ${active ? 'text-accent' : 'text-ink'}`}>{TRACKING_LABELS[t]}</Text>
+            <Text className={`text-xs ${active ? 'text-emerald-300' : 'text-ink-muted'}`}>
+              {trackingExample(t, units.label, units.distanceLabel)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 

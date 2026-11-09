@@ -118,6 +118,13 @@ export function addDaysToKey(key: string, days: number): string {
   return toLocalDateKey(new Date(y, m - 1, d + days, 12));
 }
 
+/** The Monday that starts the local week of a day key. */
+export function weekStartKey(key: string): string {
+  const [y, m, d] = key.split('-').map(Number) as [number, number, number];
+  const weekday = new Date(y, m - 1, d, 12).getDay(); // 0 = Sunday
+  return addDaysToKey(key, -((weekday + 6) % 7));
+}
+
 export function resolveLogDate(now: Date, lateNightChoice: 'yesterday' | 'today' | null): string {
   const today = toLocalDateKey(now);
   return isLateNight(now) && lateNightChoice === 'yesterday' ? addDaysToKey(today, -1) : today;

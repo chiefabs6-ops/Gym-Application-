@@ -251,20 +251,20 @@ export const setSessionSupersets = (sessionId: string, groups: readonly (string 
   });
 
 /**
- * Moves an exercise one place up (-1) or down (+1) in a workout. Superset groups are re-checked afterwards, so
- * moving an exercise out of a superset leaves no half-superset behind.
+ * Moves an exercise from one place to another in a workout (drag and drop). Superset groups are re-checked
+ * afterwards, so moving an exercise out of (or into the middle of) a superset leaves no half-superset behind.
  */
-export const moveSessionExercise = (sessionId: string, index: number, delta: -1 | 1) =>
+export const reorderSessionExercise = (sessionId: string, from: number, to: number) =>
   write(async () => {
     const rows = await db.getAllAsync<{ id: string; order_index: number; superset_group: string | null }>(
       `SELECT id, order_index, superset_group FROM session_exercises
        WHERE session_id = ? AND deleted_at IS NULL ORDER BY order_index`,
       [sessionId],
     );
-    const j = index + delta;
-    if (index < 0 || j < 0 || j >= rows.length) return [];
+    if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return [];
     const order = [...rows];
-    [order[index], order[j]] = [order[j]!, order[index]!];
+    const [moved] = order.splice(from, 1);
+    order.splice(to, 0, moved!);
     const groups = normalizeGroups(order.map((r) => r.superset_group));
     return Promise.all(
       order.map((r, i) =>
@@ -274,6 +274,10 @@ export const moveSessionExercise = (sessionId: string, index: number, delta: -1 
       ),
     );
   });
+
+/** Moves an exercise one place up (-1) or down (+1); see reorderSessionExercise. */
+export const moveSessionExercise = (sessionId: string, index: number, delta: -1 | 1) =>
+  reorderSessionExercise(sessionId, index, index + delta);
 
 /** Swaps the exercise in a workout slot (e.g. machine taken) while keeping its sets, notes and place. */
 export const replaceSessionExercise = (sessionExerciseId: string, exerciseId: string) =>

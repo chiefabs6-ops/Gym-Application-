@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, BackHandler, Pressable, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import {
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   Copy,
   Folder,
   FolderPlus,
   Link2,
-  ListTree,
   Minus,
   MoreHorizontal,
   Play,
@@ -25,6 +23,7 @@ import {
   expandTemplateSets,
   isLinkedWithNext,
   linkWithNext,
+  normalizeGroups,
   supersetLabels,
   unlinkFromNext,
   formatDuration,
@@ -46,6 +45,7 @@ import { ExerciseSelector } from '../components/ExerciseSelector';
 import { FolderSheet } from '../components/FolderSheet';
 import { PlanDayPicker } from '../components/PlanDayPicker';
 import { SET_TYPE_STYLE } from '../components/SetRow';
+import { DragHandle, useDragReorder } from '../components/DragReorder';
 import { ToggleRow } from '../components/SettingsControls';
 import { WorkoutConflictSheet } from '../components/WorkoutConflictSheet';
 import { db } from '../db/client';
@@ -60,8 +60,11 @@ import {
 } from '../db/repositories/templates';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { useActiveWorkoutStore } from '../state/activeWorkoutStore';
+import { ROUTINE_NAMES_SQL } from '../hooks/usePlan';
+import { namesPreview } from '../db/repositories/stats';
+import { shortDay } from '../components/dates';
 import { useSettingsStore, useUnits } from '../state/settingsStore';
-import { cardShadow, colors } from '../theme';
+import { colors } from '../theme';
 
 /** Editor row: the stored template exercise + display name + whether the typed reps text is invalid. */
 type DraftItem = TemplateExercise & { name: string; tracking_type: TrackingType; repsError?: boolean };
@@ -92,7 +95,11 @@ interface RoutineRow {
   id: string;
   title: string;
   folder: string | null;
+  plan_day_id: string | null;
   n: number;
+  last_used: number | null;
+  /** Exercise names, one per line. */
+  names: string | null;
 }
 
 function RoutineList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string) => void }) {
@@ -103,12 +110,19 @@ function RoutineList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
   const [conflict, setConflict] = useState<{ id: string; title: string } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
+  const plan = useSettingsStore((s) => s.training_plan);
   const { data } = useLiveQuery<RoutineRow>(
-    `SELECT id, title, folder, json_array_length(template_exercises) AS n FROM workout_templates
-     WHERE deleted_at IS NULL ORDER BY title COLLATE NOCASE`,
+    `SELECT t.id, t.title, t.folder, t.plan_day_id, json_array_length(t.template_exercises) AS n,
+       (SELECT MAX(s.start_time) FROM workout_sessions s
+        WHERE s.template_id = t.id AND s.deleted_at IS NULL AND s.end_time IS NOT NULL) AS last_used,
+       ${ROUTINE_NAMES_SQL}
+     FROM workout_templates t
+     WHERE t.deleted_at IS NULL ORDER BY t.title COLLATE NOCASE`,
     [],
-    ['workout_templates'],
+    ['workout_templates', 'workout_sessions', 'exercise_definitions'],
   );
+  const dayName = (id: string | null) => plan?.days.find((d) => d.id === id)?.name ?? null;
+  const folderCount = new Set(data.map((r) => r.folder).filter(Boolean)).size;
 
   // Folders A→Z, then routines without a folder. With no folders at all, one headerless section.
   const sections = useMemo(() => {
@@ -144,12 +158,20 @@ function RoutineList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
   };
 
   return (
-    <View className="flex-1 p-4">
-      <View className="mb-4 flex-row items-center justify-between">
-        <Text className="text-3xl font-bold text-ink">Routines</Text>
-        <Pressable onPress={onNew} className="flex-row items-center gap-1 rounded-xl bg-accent px-4 py-2.5 active:opacity-80">
-          <Plus size={16} color={colors.bg} />
-          <Text className="font-bold text-surface">New</Text>
+    <View className="flex-1 px-4 pt-5">
+      <View className="mb-2 flex-row items-center justify-between px-1">
+        <View className="gap-0.5">
+          <Text className="text-2xl font-bold text-ink">Routines</Text>
+          {data.length > 0 && (
+            <Text className="text-sm text-ink-muted">
+              {data.length} routine{data.length === 1 ? '' : 's'}
+              {folderCount > 0 ? ` in ${folderCount + (sections.some((x) => x.folder === null) ? 1 : 0)} groups` : ''}
+            </Text>
+          )}
+        </View>
+        <Pressable onPress={onNew} className="h-11 flex-row items-center gap-1.5 rounded-full bg-accent px-[18px] active:opacity-80">
+          <Plus size={16} color={colors.bg} strokeWidth={2.5} />
+          <Text className="text-[15px] font-bold text-surface">New</Text>
         </Pressable>
       </View>
       <SectionList
@@ -157,28 +179,27 @@ function RoutineList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
         keyExtractor={(t) => t.id}
         stickySectionHeadersEnabled={false}
         contentContainerStyle={{ paddingBottom: 24 }}
-        ItemSeparatorComponent={() => <View className="h-2.5" />}
         ListEmptyComponent={
-          <Text className="mt-6 text-center text-ink-subtle">No routines yet. Tap New to build one.</Text>
+          <View className="mt-4 rounded-[20px] bg-surface-raised p-4">
+            <Text className="text-sm text-ink-muted">No routines yet. Tap New to build one.</Text>
+          </View>
         }
         renderSectionHeader={({ section }) =>
           hasFolders ? (
-            <View className="mb-2 mt-3 flex-row items-center gap-2">
+            <View className="mb-2 mt-4 flex-row items-center gap-2 px-1">
               <Pressable
                 onPress={() => toggle(section.key)}
                 className="flex-1 flex-row items-center gap-2 py-1.5"
                 accessibilityLabel={`${section.folder ?? 'No folder'}, ${section.count} routines. Tap to ${collapsed.has(section.key) ? 'expand' : 'collapse'}`}
               >
                 {collapsed.has(section.key) ? (
-                  <ChevronRight size={16} color={colors.subtle} />
+                  <ChevronRight size={16} color={colors.muted} />
                 ) : (
-                  <ChevronDown size={16} color={colors.subtle} />
+                  <ChevronDown size={16} color={colors.muted} />
                 )}
-                {section.folder && <Folder size={15} color={colors.muted} />}
-                <Text className="text-xs font-semibold uppercase tracking-widest text-ink-subtle" numberOfLines={1}>
-                  {section.folder ?? 'No folder'}
+                <Text className="shrink text-base font-semibold text-ink" numberOfLines={1}>
+                  {section.folder ?? 'No folder'} <Text className="font-normal text-ink-muted">{section.count}</Text>
                 </Text>
-                <Text className="text-xs text-ink-faint">{section.count}</Text>
               </Pressable>
               {section.folder && (
                 <Pressable
@@ -193,29 +214,48 @@ function RoutineList({ onNew, onEdit }: { onNew: () => void; onEdit: (id: string
             </View>
           ) : null
         }
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => onEdit(item.id)}
-            className="flex-row items-center gap-3 rounded-card border border-surface-border bg-surface-raised p-4 active:opacity-80"
-            accessibilityLabel={`${item.title}, ${item.n} exercises. Tap to edit`}
-          >
-            <View className="flex-1">
-              <Text className="text-base font-semibold text-ink">{item.title}</Text>
-              <Text className="text-xs text-ink-subtle">
-                {item.n} exercise{item.n === 1 ? '' : 's'} · tap to edit
-              </Text>
-            </View>
+        renderItem={({ item, index, section }) => {
+          // One grouped panel per folder: rounded at the panel's ends, a fine line between rows.
+          const first = index === 0;
+          const last = index === section.data.length - 1;
+          return (
             <Pressable
-              onPress={() => startRoutine(item)}
-              hitSlop={8}
-              className="h-10 w-10 items-center justify-center rounded-full bg-accent-soft"
-              accessibilityLabel={`Start ${item.title}`}
+              onPress={() => onEdit(item.id)}
+              className={`min-h-[72px] flex-row items-center gap-3 bg-surface-raised px-4 py-2.5 active:bg-surface-elevated ${
+                first ? 'rounded-t-[20px] pt-3.5' : 'border-t border-surface-elevated'
+              } ${last ? 'rounded-b-[20px] pb-3.5' : ''}`}
+              accessibilityLabel={`${item.title}, ${item.n} exercises. Tap to edit`}
             >
-              <Play size={16} color={colors.accent} fill={colors.accent} />
+              <View className="flex-1 gap-[3px]">
+                <Text className="text-base font-semibold text-ink" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                {!!item.names && (
+                  <Text className="text-[13px] text-ink-muted" numberOfLines={1}>
+                    {namesPreview(item.names)}
+                  </Text>
+                )}
+                <Text className="text-[13px] text-ink-subtle" numberOfLines={1}>
+                  {[
+                    dayName(item.plan_day_id) && `${dayName(item.plan_day_id)} day`,
+                    `${item.n} exercise${item.n === 1 ? '' : 's'}`,
+                    item.last_used ? shortDay(item.last_used) : 'Not done yet',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => startRoutine(item)}
+                hitSlop={8}
+                className="h-10 w-10 items-center justify-center rounded-full bg-accent-soft"
+                accessibilityLabel={`Start ${item.title}`}
+              >
+                <Play size={15} color={colors.accent} fill={colors.accent} />
+              </Pressable>
             </Pressable>
-            <ChevronRight size={18} color={colors.faint} />
-          </Pressable>
-        )}
+          );
+        }}
       />
 
       <FolderSheet
@@ -347,14 +387,17 @@ export function RoutineEditor({
   );
 
   const patch = (i: number, p: Partial<DraftItem>) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...p } : it)));
-  const move = (i: number, delta: -1 | 1) =>
+  /** Drag and drop: superset links are re-checked so moving an exercise never leaves half a superset. */
+  const reorder = useDragReorder(items.length, (from, to) =>
     setItems((prev) => {
-      const j = i + delta;
-      if (j < 0 || j >= prev.length) return prev;
       const next = [...prev];
-      [next[i], next[j]] = [next[j]!, next[i]!];
-      return next;
-    });
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved!);
+      const clean = normalizeGroups(next.map((it) => it.superset_group));
+      return next.map((it, i) => ({ ...it, superset_group: clean[i] ?? null }));
+    }),
+  );
+  const hasPlan = useSettingsStore((s) => s.training_plan) !== null;
 
   /** Returns why the draft can't be saved, or null. */
   const problem = (): ConfirmRequest | null => {
@@ -477,176 +520,216 @@ export function RoutineEditor({
         </Pressable>
       </View>
 
-      <FlatList
-        data={items}
-        keyExtractor={(it, i) => `${it.exercise_id}-${i}`}
+      <KeyboardAwareScrollView
         // Scrolls the field being edited above the keyboard (edge-to-edge doesn't resize the window).
-        renderScrollComponent={(props) => <KeyboardAwareScrollView {...props} bottomOffset={16} />}
-        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
+        bottomOffset={16}
+        scrollEnabled={!reorder.dragging}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <View className="mb-2 gap-3">
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder={isDraft ? 'Workout name (optional)' : 'Routine name (e.g. Push Day)'}
-              placeholderTextColor={colors.subtle}
-              className="rounded-xl bg-surface-raised px-4 py-3.5 text-base text-ink"
-            />
-            {!isDraft && <FolderPicker value={folder} folders={folders} onChange={setFolder} />}
-          </View>
-        }
-        renderItem={({ item, index }) => (
-          <View>
-          <View
-            className={`rounded-card border bg-surface-raised p-3 ${labels[index] ? 'border-superset/40' : 'border-surface-border'}`}
-          >
-            <View className="mb-2 flex-row items-center gap-1">
-              <Text className="flex-1 text-base font-semibold text-ink" numberOfLines={1}>
-                {labels[index] ? <Text className="text-superset">{labels[index]} </Text> : `${index + 1}. `}
-                {item.name}
-              </Text>
-              <IconButton label="Move up" disabled={index === 0} onPress={() => move(index, -1)}>
-                <ChevronUp size={16} color={colors.muted} />
-              </IconButton>
-              <IconButton label="Move down" disabled={index === items.length - 1} onPress={() => move(index, 1)}>
-                <ChevronDown size={16} color={colors.muted} />
-              </IconButton>
-              <IconButton label={`Remove ${item.name}`} onPress={() => setItems((p) => p.filter((_, i) => i !== index))}>
-                <X size={16} color={colors.muted} />
-              </IconButton>
+      >
+        <View className="mb-3 gap-3">
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder={isDraft ? 'Workout name (optional)' : 'Routine name (e.g. Push Day)'}
+            placeholderTextColor={colors.subtle}
+            className="rounded-[14px] bg-surface-raised px-4 py-3.5 text-[17px] font-semibold text-ink"
+          />
+          {hasPlan && (
+            <View className="gap-1.5">
+              <Text className="pl-1 text-[13px] text-ink-muted">Plan day</Text>
+              <PlanDayPicker value={planDayId} onChange={setPlanDayId} showIcon={false} />
             </View>
+          )}
+          {!isDraft && (
+            <View className="gap-1.5">
+              <Text className="pl-1 text-[13px] text-ink-muted">Folder</Text>
+              <FolderPicker value={folder} folders={folders} onChange={setFolder} />
+            </View>
+          )}
+        </View>
 
-            {item.sets ? (
-              <PerSetTable sets={item.sets} trackingType={item.tracking_type} onChange={(sets) => patch(index, { sets })} />
-            ) : (
-              <View className="flex-row flex-wrap items-center gap-x-5 gap-y-3">
-                <Stepper label="Sets" value={item.target_sets} onChange={(v) => patch(index, { target_sets: Math.min(50, Math.max(1, v)) })} />
-                {usesField(item.tracking_type, 'reps') && <RepsField item={item} onChange={(p) => patch(index, p)} />}
-                {usesField(item.tracking_type, 'weight') && (
-                  <WeightField
-                    sign={weightSign(item.tracking_type)}
-                    valueKg={item.target_weight_kg ?? null}
-                    onChange={(kg) => patch(index, { target_weight_kg: kg })}
+        {items.map((item, index) => (
+          <Animated.View key={`${item.exercise_id}-${index}`} onLayout={reorder.measure(index)} style={reorder.rowStyle(index)}>
+            <View
+              className={`gap-3 rounded-[20px] bg-surface-raised py-3 pl-2 pr-3.5 ${labels[index] ? 'border border-superset/40' : ''}`}
+              style={
+                reorder.drag?.from === index
+                  ? { shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 12, shadowOffset: { width: 0, height: 8 }, elevation: 10 }
+                  : undefined
+              }
+            >
+              <View className="flex-row items-center gap-2">
+                {items.length > 1 ? (
+                  <DragHandle
+                    label={`Drag ${item.name} to reorder`}
+                    active={reorder.drag?.from === index}
+                    {...reorder.handlers(index)}
                   />
+                ) : (
+                  <View className="w-1" />
                 )}
-                {usesField(item.tracking_type, 'distance') && (
-                  <DistanceField valueM={item.target_distance_m} onChange={(m) => patch(index, { target_distance_m: m })} />
-                )}
-                {usesField(item.tracking_type, 'duration') && (
-                  <View className="flex-row items-center gap-2">
-                    <Text className="text-xs text-ink-muted">Time</Text>
-                    <View className="w-20">
-                      <TimeInput value={item.target_duration_s} onChange={(s) => patch(index, { target_duration_s: s })} />
-                    </View>
+                <Text className="flex-1 text-base font-semibold text-ink" numberOfLines={1}>
+                  {labels[index] && <Text className="text-superset">{labels[index]} </Text>}
+                  {item.name}
+                </Text>
+                <Pressable
+                  onPress={() => setItems((p) => p.filter((_, i) => i !== index))}
+                  hitSlop={4}
+                  className="h-9 w-9 items-center justify-center rounded-full bg-surface-elevated active:opacity-70"
+                  accessibilityLabel={`Remove ${item.name}`}
+                >
+                  <X size={16} color={colors.muted} />
+                </Pressable>
+              </View>
+
+              <View className="pl-1.5">
+                {item.sets ? (
+                  <PerSetTable sets={item.sets} trackingType={item.tracking_type} onChange={(sets) => patch(index, { sets })} />
+                ) : (
+                  <View className="flex-row gap-2">
+                    <Box label="Sets" grow={1.3}>
+                      <Stepper value={item.target_sets} onChange={(v) => patch(index, { target_sets: Math.min(50, Math.max(1, v)) })} label="sets" />
+                    </Box>
+                    {usesField(item.tracking_type, 'reps') && (
+                      <Box label="Reps">
+                        <RepsField item={item} onChange={(p) => patch(index, p)} />
+                      </Box>
+                    )}
+                    {usesField(item.tracking_type, 'weight') && (
+                      <Box
+                        label={
+                          weightSign(item.tracking_type) === '+'
+                            ? 'Added'
+                            : weightSign(item.tracking_type) === '−'
+                              ? 'Assist'
+                              : 'Weight'
+                        }
+                      >
+                        <WeightField
+                          sign={weightSign(item.tracking_type)}
+                          valueKg={item.target_weight_kg ?? null}
+                          onChange={(kg) => patch(index, { target_weight_kg: kg })}
+                        />
+                      </Box>
+                    )}
+                    {usesField(item.tracking_type, 'distance') && (
+                      <Box label="Distance">
+                        <DistanceField valueM={item.target_distance_m} onChange={(m) => patch(index, { target_distance_m: m })} />
+                      </Box>
+                    )}
+                    {usesField(item.tracking_type, 'duration') && (
+                      <Box label="Time">
+                        <TimeInput value={item.target_duration_s} onChange={(s) => patch(index, { target_duration_s: s })} />
+                      </Box>
+                    )}
                   </View>
                 )}
               </View>
-            )}
 
-            <View className="mt-3 flex-row flex-wrap items-center justify-between gap-3">
-              <Stepper
-                label="Rest"
-                value={item.rest_seconds ?? defaultRest}
-                step={15}
-                format={formatRest}
-                onChange={(v) => patch(index, { rest_seconds: Math.min(REST_SECONDS_MAX, Math.max(0, v)) })}
-                onPressValue={() => setEditingRestIndex(index)}
-              />
-              <Pressable
-                onPress={() =>
-                  patch(index, item.sets ? collapseSets(item.sets) : { sets: expandTemplateSets(item), repsError: false })
-                }
-                hitSlop={6}
-                className="flex-row items-center gap-1.5 rounded-lg px-2 py-1 active:bg-surface-elevated"
-              >
-                <ListTree size={14} color={colors.accent} />
-                <Text className="text-xs font-semibold text-accent">{item.sets ? 'Same for all sets' : 'Customise sets'}</Text>
-              </Pressable>
-            </View>
-            {item.tracking_type === 'duration' && !isDraft && (
-              <ToggleRow
-                label="Auto-start next set"
-                hint="Interval timer: after rest, the next set's countdown starts by itself"
-                value={item.auto_next ?? false}
-                onChange={(v) => patch(index, { auto_next: v })}
-              />
-            )}
-          </View>
-          {index < items.length - 1 && (
-            <Pressable
-              onPress={() => toggleLink(index)}
-              hitSlop={4}
-              className="-mb-1 mt-1.5 flex-row items-center justify-center gap-1.5 py-1"
-              accessibilityLabel={isLinkedWithNext(groups, index) ? 'Unlink superset' : 'Superset with next exercise'}
-            >
-              {isLinkedWithNext(groups, index) ? (
-                <Unlink size={13} color={colors.superset} />
-              ) : (
-                <Link2 size={13} color={colors.faint} />
-              )}
-              <Text className={`text-xs ${isLinkedWithNext(groups, index) ? 'text-superset' : 'text-ink-faint'}`}>
-                {isLinkedWithNext(groups, index) ? 'Superset · tap to unlink' : 'Superset with next'}
-              </Text>
-            </Pressable>
-          )}
-          </View>
-        )}
-        ListFooterComponent={
-          <View className="gap-3">
-            <Pressable
-              onPress={() => setSelectorOpen(true)}
-              className="mt-1 flex-row items-center justify-center gap-2 rounded-xl border border-dashed border-accent/50 py-3.5 active:bg-accent-soft"
-            >
-              <Plus size={18} color={colors.accent} />
-              <Text className="font-semibold text-accent">Add exercise</Text>
-            </Pressable>
-            <View className="mt-4">
-              <PlanDayPicker value={planDayId} onChange={setPlanDayId} />
-            </View>
-            {isDraft && (
-              <Pressable
-                onPress={() => void startDraft()}
-                disabled={saving}
-                className="mt-4 flex-row items-center justify-center gap-2 rounded-card bg-accent py-4 active:opacity-80"
-                style={cardShadow}
-              >
-                <Play size={18} color={colors.bg} fill={colors.bg} />
-                <Text className="text-base font-bold text-surface">Start workout</Text>
-              </Pressable>
-            )}
-            {templateId && !isDraft && (
-              <View className="mt-4 flex-row gap-2">
+              <View className="flex-row flex-wrap items-center justify-between gap-3 pl-1.5">
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-xs text-ink-muted">Rest</Text>
+                  <Stepper
+                    label="rest"
+                    small
+                    value={item.rest_seconds ?? defaultRest}
+                    step={15}
+                    format={formatRest}
+                    onChange={(v) => patch(index, { rest_seconds: Math.min(REST_SECONDS_MAX, Math.max(0, v)) })}
+                    onPressValue={() => setEditingRestIndex(index)}
+                  />
+                </View>
                 <Pressable
-                  onPress={duplicate}
-                  className="flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-surface-border py-3 active:opacity-70"
+                  onPress={() =>
+                    patch(index, item.sets ? collapseSets(item.sets) : { sets: expandTemplateSets(item), repsError: false })
+                  }
+                  hitSlop={6}
+                  className="rounded-lg px-2 py-1 active:bg-surface-elevated"
                 >
-                  <Copy size={16} color={colors.muted} />
-                  <Text className="font-semibold text-ink-muted">Duplicate</Text>
-                </Pressable>
-                <Pressable
-                  onPress={askDelete}
-                  className="flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-settype-failure/30 py-3 active:opacity-70"
-                >
-                  <Trash2 size={16} color={colors.danger} />
-                  <Text className="font-semibold text-settype-failure">Delete</Text>
+                  <Text className="text-[13px] font-semibold text-accent">{item.sets ? 'Same for all sets' : 'Customise sets'}</Text>
                 </Pressable>
               </View>
+              {item.tracking_type === 'duration' && !isDraft && (
+                <ToggleRow
+                  label="Auto-start next set"
+                  hint="Interval timer: after rest, the next set's countdown starts by itself"
+                  value={item.auto_next ?? false}
+                  onChange={(v) => patch(index, { auto_next: v })}
+                />
+              )}
+            </View>
+            {index < items.length - 1 ? (
+              <Pressable
+                onPress={() => toggleLink(index)}
+                hitSlop={4}
+                className={`flex-row items-center justify-center gap-1.5 py-2 ${reorder.dragging ? 'opacity-0' : ''}`}
+                accessibilityLabel={isLinkedWithNext(groups, index) ? 'Unlink superset' : 'Superset with next exercise'}
+              >
+                {isLinkedWithNext(groups, index) ? (
+                  <Unlink size={13} color={colors.superset} />
+                ) : (
+                  <Link2 size={13} color={colors.faint} />
+                )}
+                <Text className={`text-xs ${isLinkedWithNext(groups, index) ? 'text-superset' : 'text-ink-faint'}`}>
+                  {isLinkedWithNext(groups, index) ? 'Superset · tap to unlink' : 'Superset with next'}
+                </Text>
+              </Pressable>
+            ) : (
+              <View className="h-2.5" />
             )}
-          </View>
-        }
-      />
+          </Animated.View>
+        ))}
+
+        <View className="gap-3">
+          <Pressable
+            onPress={() => setSelectorOpen(true)}
+            className="mt-1 flex-row items-center justify-center gap-2 rounded-[14px] border border-dashed border-accent/50 py-3.5 active:bg-accent-soft"
+          >
+            <Plus size={18} color={colors.accent} />
+            <Text className="font-semibold text-accent">Add exercise</Text>
+          </Pressable>
+          {isDraft && (
+            <Pressable
+              onPress={() => void startDraft()}
+              disabled={saving}
+              className="mt-4 h-[52px] flex-row items-center justify-center gap-2 rounded-full bg-accent active:opacity-80"
+            >
+              <Play size={18} color={colors.bg} fill={colors.bg} />
+              <Text className="text-base font-bold text-surface">Start workout</Text>
+            </Pressable>
+          )}
+          {templateId && !isDraft && (
+            <View className="mt-3 flex-row gap-2">
+              <Pressable
+                onPress={duplicate}
+                className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-surface-raised active:opacity-70"
+              >
+                <Copy size={16} color={colors.ink} />
+                <Text className="font-semibold text-ink">Duplicate</Text>
+              </Pressable>
+              <Pressable
+                onPress={askDelete}
+                className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-full bg-settype-failure/15 active:opacity-70"
+              >
+                <Trash2 size={16} color={colors.danger} />
+                <Text className="font-semibold text-settype-failure">Delete</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </KeyboardAwareScrollView>
 
       <ExerciseSelector
         visible={selectorOpen}
         onClose={() => setSelectorOpen(false)}
-        onSelect={(e) =>
+        onSelectMany={(picked) =>
           setItems((prev) => [
             ...prev,
-            {
+            ...picked.map((e, k) => ({
               exercise_id: e.id,
               name: e.name,
-              order_index: prev.length,
+              order_index: prev.length + k,
               target_sets: 3,
               rest_seconds: defaultRest,
               target_weight_kg: null,
@@ -660,7 +743,7 @@ export function RoutineEditor({
               tracking_type: e.tracking_type,
               // Rep-based types start at 3 × 10; time / distance start empty.
               target_reps: usesField(e.tracking_type, 'reps') ? 10 : null,
-            },
+            })),
           ])
         }
       />
@@ -710,7 +793,6 @@ export function FolderPicker({ value, folders, onChange }: { value: string | nul
 
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, alignItems: 'center' }}>
-      <Folder size={16} color={colors.subtle} />
       <Chip label="No folder" active={value === null} onPress={() => onChange(null)} />
       {options.map((f) => (
         <Chip key={f} label={f} active={value === f} onPress={() => onChange(f)} />
@@ -730,7 +812,7 @@ export function FolderPicker({ value, folders, onChange }: { value: string | nul
       ) : (
         <Pressable
           onPress={() => setAdding(true)}
-          className="flex-row items-center gap-1 rounded-full border border-dashed border-surface-border px-3 py-1.5 active:opacity-70"
+          className="flex-row items-center gap-1 rounded-full border border-dashed border-surface-border px-3.5 py-2 active:opacity-70"
         >
           <FolderPlus size={14} color={colors.muted} />
           <Text className="text-sm text-ink-muted">New folder</Text>
@@ -744,7 +826,7 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
   return (
     <Pressable
       onPress={onPress}
-      className={`rounded-full border px-3 py-1.5 ${active ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-raised'}`}
+      className={`rounded-full border px-3.5 py-2 ${active ? 'border-accent bg-accent-soft' : 'border-surface-raised bg-surface-raised'}`}
     >
       <Text className={`text-sm ${active ? 'font-semibold text-accent' : 'text-ink-muted'}`}>{label}</Text>
     </Pressable>
@@ -752,6 +834,16 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 }
 
 /** Reps as text: "10" or a range "8-12". Invalid text is flagged and blocks saving. */
+/** A target field: its label above a filled box. */
+function Box({ label, grow = 1, children }: { label: string; grow?: number; children: React.ReactNode }) {
+  return (
+    <View className="min-w-0 gap-1" style={{ flex: grow }}>
+      <Text className="text-xs text-ink-muted">{label}</Text>
+      <View className="h-10 justify-center rounded-xl bg-surface-elevated">{children}</View>
+    </View>
+  );
+}
+
 function RepsField({ item, onChange }: { item: DraftItem; onChange: (p: Partial<DraftItem>) => void }) {
   const [text, setText] = useState(formatRepTarget(item));
   const change = (t: string) => {
@@ -760,19 +852,16 @@ function RepsField({ item, onChange }: { item: DraftItem; onChange: (p: Partial<
     onChange(parsed ? { ...parsed, repsError: false } : { repsError: true });
   };
   return (
-    <View className="flex-row items-center gap-2">
-      <Text className="text-xs text-ink-muted">Reps</Text>
-      <TextInput
-        value={text}
-        onChangeText={change}
-        keyboardType="numbers-and-punctuation"
-        placeholder="—"
-        placeholderTextColor={colors.faint}
-        selectTextOnFocus
-        className={`w-20 rounded-lg bg-surface-elevated px-2 py-1 text-center tabular-nums text-ink ${item.repsError ? 'border border-settype-failure' : ''}`}
-        accessibilityLabel="Target reps, a number or a range like 8-12"
-      />
-    </View>
+    <TextInput
+      value={text}
+      onChangeText={change}
+      keyboardType="numbers-and-punctuation"
+      placeholder="—"
+      placeholderTextColor={colors.faint}
+      selectTextOnFocus
+      className={`h-10 rounded-xl px-2 text-center font-semibold tabular-nums text-ink ${item.repsError ? 'border border-settype-failure' : ''}`}
+      accessibilityLabel="Target reps, a number or a range like 8-12"
+    />
   );
 }
 
@@ -911,9 +1000,8 @@ function TimeInput({ value, onChange }: { value: number | null; onChange: (secon
 function DistanceField({ valueM, onChange }: { valueM: number | null; onChange: (m: number | null) => void }) {
   const units = useUnits();
   return (
-    <View className="flex-row items-center gap-2">
-      <Text className="text-xs text-ink-muted">Distance</Text>
-      <View className="w-16">
+    <View className="flex-row items-center pr-2.5">
+      <View className="flex-1">
         <NumberInput
           value={valueM === null ? null : Number(units.displayDistance(valueM))}
           decimal
@@ -958,20 +1046,6 @@ function NumberInput({
   );
 }
 
-function IconButton({ label, disabled, onPress, children }: { label: string; disabled?: boolean; onPress: () => void; children: React.ReactNode }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={4}
-      className={`h-8 w-8 items-center justify-center rounded-lg bg-surface-elevated ${disabled ? 'opacity-30' : 'active:opacity-70'}`}
-      accessibilityLabel={label}
-    >
-      {children}
-    </Pressable>
-  );
-}
-
 /**
  * Target weight in the user's unit (stored in kg). Empty = no target. Updates the draft on every
  * keystroke (it's only saved with the routine), so tapping Save straight after typing never loses it.
@@ -998,8 +1072,7 @@ function WeightField({
   };
 
   return (
-    <View className="flex-row items-center gap-2">
-      <Text className="text-xs text-ink-muted">{sign === '+' ? 'Added' : sign === '−' ? 'Assist' : 'Weight'}</Text>
+    <View className="flex-row items-center pr-2.5">
       <TextInput
         value={text}
         onChangeText={change}
@@ -1007,7 +1080,7 @@ function WeightField({
         placeholder="—"
         placeholderTextColor={colors.faint}
         selectTextOnFocus
-        className="w-16 rounded-lg bg-surface-elevated px-2 py-1 text-center tabular-nums text-ink"
+        className="h-10 flex-1 px-1 text-center font-semibold tabular-nums text-ink"
         accessibilityLabel={`Target weight in ${units.label}`}
       />
       <Text className="text-xs text-ink-subtle">
@@ -1023,36 +1096,37 @@ function Stepper({
   value,
   step = 1,
   format = String,
+  small = false,
   onChange,
   onPressValue,
 }: {
+  /** For screen readers: "sets", "rest". */
   label: string;
   value: number;
   step?: number;
   format?: (v: number) => string;
+  small?: boolean;
   onChange: (v: number) => void;
   /** Makes the value tappable (e.g. to type an exact time). */
   onPressValue?: () => void;
 }) {
+  const button = `items-center justify-center bg-surface-border active:opacity-70 ${small ? 'h-7 w-7 rounded-[9px]' : 'h-8 w-8 rounded-[10px]'}`;
   return (
-    <View className="flex-row items-center gap-2">
-      <Text className="text-xs text-ink-muted">{label}</Text>
-      <Pressable onPress={() => onChange(value - step)} className="rounded-md bg-surface-elevated p-1.5" accessibilityLabel={`Decrease ${label}`}>
-        <Minus size={12} color={colors.ink} />
+    <View className={`flex-row items-center justify-between ${small ? 'h-9 gap-1.5 rounded-xl bg-surface-elevated px-1' : 'px-1'}`}>
+      <Pressable onPress={() => onChange(value - step)} className={button} accessibilityLabel={`Decrease ${label}`}>
+        <Minus size={14} color={colors.ink} />
       </Pressable>
       <Pressable
         onPress={onPressValue}
         disabled={!onPressValue}
         hitSlop={6}
-        className={onPressValue ? 'rounded border border-dashed border-surface-border px-1.5 py-0.5' : ''}
         accessibilityLabel={onPressValue ? `${label} ${format(value)}. Tap to type a value` : undefined}
       >
-        <Text className="min-w-6 text-center tabular-nums text-ink">{format(value)}</Text>
+        <Text className="min-w-9 text-center font-semibold tabular-nums text-ink">{format(value)}</Text>
       </Pressable>
-      <Pressable onPress={() => onChange(value + step)} className="rounded-md bg-surface-elevated p-1.5" accessibilityLabel={`Increase ${label}`}>
-        <Plus size={12} color={colors.ink} />
+      <Pressable onPress={() => onChange(value + step)} className={button} accessibilityLabel={`Increase ${label}`}>
+        <Plus size={14} color={colors.ink} />
       </Pressable>
     </View>
   );
 }
-

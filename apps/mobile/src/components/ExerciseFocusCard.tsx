@@ -1,14 +1,16 @@
 import { memo, useEffect, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import { Disc3, Flame, NotebookPen, PlayCircle, Plus, Repeat, Timer } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronUp, Disc3, Flame, NotebookPen, PersonStanding, Plus, Repeat, Timer } from 'lucide-react-native';
 import {
   REST_SECONDS_MAX,
   formatDuration,
+  formatSetSummary,
   generateWarmups,
   resolveAutoNext,
   resolveRestSeconds,
   type Equipment,
+  type UnitSystem,
   type PRKind,
   type TrackingType,
 } from '@gym/shared';
@@ -20,7 +22,6 @@ import { usePreviousPerformance } from '../db/usePreviousPerformance';
 import { useActiveWorkoutStore } from '../state/activeWorkoutStore';
 import { useSettingsStore, useUnits } from '../state/settingsStore';
 import { cardShadow, colors } from '../theme';
-import { ExerciseIllustration } from './ExerciseIllustration';
 import { FormGuideSheet } from './FormGuideSheet';
 import { SetRow, SetTableHeader, type SetViewRow } from './SetRow';
 import { SupersetStrip, type SupersetMember } from './SupersetStrip';
@@ -127,12 +128,20 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
   const done = sets.filter((s) => s.is_completed === 1).length;
   // Quick actions: 4 → a 2 × 2 grid (labels like "Auto-next on" need the room), otherwise rows of 3.
   const actionCount =
-    3 +
+    2 +
     (exercise.tracking_type === 'weight_reps' ? 1 : 0) +
     (exercise.tracking_type === 'weight_reps' && exercise.equipment === 'barbell' ? 1 : 0) +
     (exercise.tracking_type === 'duration' ? 1 : 0);
   const actionBasis = actionCount === 4 ? '48%' : '31%';
-  let working = 0;
+  const workingNumbers = (() => {
+    let n = 0;
+    return sets.map((s) => (s.set_type === 'warmup' ? 0 : ++n));
+  })();
+  const fold = foldSets(sets, exercise.tracking_type, units.unit);
+  const [showDone, setShowDone] = useState(false);
+  const [showLater, setShowLater] = useState(false);
+  const hidden = (i: number) =>
+    fold !== null && ((!showDone && i < fold.doneCount) || (!showLater && fold.laterFrom !== null && i >= fold.laterFrom));
 
   return (
     <View style={{ width }}>
@@ -156,22 +165,17 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
               <Text className="mt-0.5 text-sm capitalize text-ink-subtle">
                 {exercise.primary_muscle.replace('_', ' ')} · {exercise.equipment}
               </Text>
-              {repRange && <Text className="mt-1 text-sm font-semibold text-accent">Target {repRange} reps</Text>}
+              <View className="mt-1.5 flex-row flex-wrap items-center gap-2">
+                <View className={`rounded-full px-3 py-1 ${done === sets.length && sets.length > 0 ? 'bg-accent-soft' : 'bg-surface-elevated'}`}>
+                  <Text className={`text-xs font-bold ${done === sets.length && sets.length > 0 ? 'text-accent' : 'text-ink-muted'}`}>
+                    {done}/{sets.length} sets
+                  </Text>
+                </View>
+                {repRange && <Text className="text-sm font-semibold text-accent">Target {repRange} reps</Text>}
+              </View>
             </View>
-            <View className={`rounded-full px-3 py-1 ${done === sets.length && sets.length > 0 ? 'bg-accent-soft' : 'bg-surface-elevated'}`}>
-              <Text className={`text-xs font-bold ${done === sets.length && sets.length > 0 ? 'text-accent' : 'text-ink-muted'}`}>
-                {done}/{sets.length} sets
-              </Text>
-            </View>
+            <FormButton onPress={() => setGuideOpen(true)} />
           </View>
-
-          <Pressable
-            onPress={() => setGuideOpen(true)}
-            className="mb-4 active:opacity-80"
-            accessibilityLabel="Open form guide"
-          >
-            <ExerciseIllustration exerciseId={exercise.exercise_id} maxHeight={130} />
-          </Pressable>
 
           {notesOpen && (
             <TextInput
@@ -190,13 +194,22 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
           {/* Table header */}
           <SetTableHeader trackingType={exercise.tracking_type} />
 
+          {fold && fold.doneCount > 0 && (
+            <FoldRow
+              done
+              label={fold.doneCount === sets.length ? `All ${fold.doneCount} sets done` : `${fold.doneCount} sets done`}
+              each={fold.doneEach}
+              open={showDone}
+              onPress={() => setShowDone((v) => !v)}
+            />
+          )}
           <View className="gap-1">
-            {sets.map((s, i) => (
+            {sets.map((s, i) => hidden(i) ? null : (
               <SetRow
                 key={s.id}
                 set={s}
                 trackingType={exercise.tracking_type}
-                workingNumber={s.set_type === 'warmup' ? 0 : ++working}
+                workingNumber={workingNumbers[i]!}
                 previous={previous[i]}
                 prKinds={prHits[s.id]}
                 repsHint={repRange}
@@ -206,6 +219,14 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
               />
             ))}
           </View>
+          {fold && fold.laterFrom !== null && (
+            <FoldRow
+              label={`${sets.length - fold.laterFrom} more sets`}
+              each={fold.laterEach}
+              open={showLater}
+              onPress={() => setShowLater((v) => !v)}
+            />
+          )}
 
           <Pressable
             onPress={() => void useActiveWorkoutStore.getState().addSet(exercise.id)}
@@ -245,24 +266,9 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
                 onPress={() => void useActiveWorkoutStore.getState().setAutoNext(exercise.id, exercise.exercise_id, !autoNext)}
               />
             )}
-            <QuickAction
-              basis={actionBasis}
-              icon={<PlayCircle size={15} color={colors.muted} />}
-              label="Guide"
-              onPress={() => setGuideOpen(true)}
-            />
           </View>
         </View>
 
-        <View className="mt-4 gap-1">
-          {previous.length > 0 && (
-            <Text className="text-center text-xs text-ink-faint">Tap a PREVIOUS value to copy last time’s weight and reps</Text>
-          )}
-          <Text className="text-center text-xs text-ink-faint">Tap a set number ▾ for warm-up / drop / failure or a note</Text>
-          {exercise.tracking_type === 'weight_reps' && (
-            <Text className="text-center text-xs text-ink-faint">Tip: hold a weight box to open the plate calculator for that set</Text>
-          )}
-        </View>
       </KeyboardAwareScrollView>
 
       <ConfirmSheet request={notice} onClose={() => setNotice(null)} />
@@ -295,6 +301,68 @@ export const ExerciseFocusCard = memo(function ExerciseFocusCard({
     </View>
   );
 });
+
+/** Exercises with this many sets or more fold the finished ones and the far-off ones (battle ropes: 15 sets). */
+const FOLD_AT = 6;
+/** Sets left open after the next unticked one. */
+const OPEN_AHEAD = 2;
+
+/**
+ * Which sets fold away on a long exercise: the finished run at the start, and everything more than two sets after
+ * the next unticked one. `…Each` is the shared value of a folded group ("0:30") when every set in it matches.
+ */
+function foldSets(sets: SetViewRow[], type: TrackingType, unit: UnitSystem) {
+  if (sets.length < FOLD_AT) return null;
+  const next = sets.findIndex((s) => s.is_completed === 0);
+  const doneCount = next === -1 ? sets.length : next;
+  const laterFrom = next === -1 || next + OPEN_AHEAD + 1 >= sets.length ? null : next + OPEN_AHEAD + 1;
+  const each = (list: SetViewRow[]) => {
+    const values = [...new Set(list.map((s) => formatSetSummary(type, s, unit)))];
+    return values.length === 1 && values[0] ? values[0] : null;
+  };
+  return {
+    doneCount,
+    laterFrom,
+    doneEach: each(sets.slice(0, doneCount)),
+    laterEach: laterFrom === null ? null : each(sets.slice(laterFrom)),
+  };
+}
+
+function FoldRow({ label, each, open, done, onPress }: { label: string; each: string | null; open: boolean; done?: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className={`my-1 min-h-12 flex-row items-center gap-2.5 rounded-xl px-3 active:opacity-80 ${done ? 'bg-accent/10' : 'bg-surface-elevated'}`}
+      accessibilityLabel={`${label}. Tap to ${open ? 'hide' : 'show'} them`}
+    >
+      {done && (
+        <View className="h-6 w-6 items-center justify-center rounded-full bg-accent">
+          <Check size={14} strokeWidth={3} color={colors.bg} />
+        </View>
+      )}
+      <Text className="flex-1 text-sm" numberOfLines={1}>
+        <Text className={`font-semibold ${done ? 'text-accent' : 'text-ink'}`}>{label}</Text>
+        {each && <Text className="text-ink-muted"> · {each} each</Text>}
+      </Text>
+      <Text className="text-[13px] text-ink-muted">{open ? 'Hide' : 'Show'}</Text>
+      {open ? <ChevronUp size={14} color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
+    </Pressable>
+  );
+}
+
+/** Opens the form guide (illustration and tips). One icon for every exercise: the illustrations are too wide to fit. */
+function FormButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="h-16 w-20 items-center justify-center gap-1 rounded-2xl bg-surface-elevated active:opacity-70"
+      accessibilityLabel="Open form guide"
+    >
+      <PersonStanding size={26} color={colors.muted} />
+      <Text className="text-[11px] text-ink-muted">Form</Text>
+    </Pressable>
+  );
+}
 
 function QuickAction({
   icon,

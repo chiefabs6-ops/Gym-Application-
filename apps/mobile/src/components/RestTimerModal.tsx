@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { Pause, Play, SkipForward, Timer, Volume2, VolumeX } from 'lucide-react-native';
+import { Pause, Play, SkipForward, Volume2, VolumeX } from 'lucide-react-native';
 import { useRestTimer, useRestTimerStore } from '../state/restTimerStore';
 import { useSettingsStore } from '../state/settingsStore';
-import { cardShadow, colors } from '../theme';
+import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 
 const fmt = (ms: number) => {
@@ -16,13 +16,27 @@ const fmt = (ms: number) => {
  * Floating rest countdown shown after a set is completed.
  * Compact banner with +30s / Skip; tap the banner for the full timer modal.
  */
-export function RestTimerBanner() {
+export function RestTimerBanner({ next = null }: { /** What follows the rest, e.g. "set 3". */ next?: string | null }) {
   const { remainingMs, totalMs, isActive, isPaused } = useRestTimer();
+  const endsAt = useRestTimerStore((s) => s.endsAt);
   const { adjust, pause, resume, stop } = useRestTimerStore();
   const soundEnabled = useSettingsStore((s) => s.rest_sound);
   const updateSettings = useSettingsStore((s) => s.update);
   const toggleSound = () => void updateSettings({ rest_sound: !soundEnabled });
   const [expanded, setExpanded] = useState(false);
+
+  // The banner is the timer: a green fill that drains right to left. It is driven by one native animation from
+  // the wall clock (endsAt), restarted whenever the deadline changes (+30s, pause, resume), so it never drifts.
+  const drain = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (totalMs <= 0) return;
+    const left = isPaused ? remainingMs : endsAt === null ? 0 : Math.max(0, endsAt - Date.now());
+    drain.setValue(Math.min(1, left / totalMs));
+    if (isPaused || endsAt === null) return;
+    const anim = Animated.timing(drain, { toValue: 0, duration: left, easing: Easing.linear, useNativeDriver: true });
+    anim.start();
+    return () => anim.stop();
+  }, [endsAt, totalMs, isPaused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isActive) return null;
   const progress = totalMs > 0 ? Math.min(1, remainingMs / totalMs) : 0;
@@ -31,35 +45,37 @@ export function RestTimerBanner() {
     void stop();
     setExpanded(false);
   };
+  // The last 10 seconds turn the remaining fill brighter: get ready.
+  const fill = remainingMs <= 10_000 ? '#0F9F6E' : '#0E6B4F';
 
   return (
     <>
-      <View className="mx-4 mb-2 overflow-hidden rounded-2xl border border-surface-border bg-surface-raised" style={cardShadow}>
-        <Pressable onPress={() => setExpanded(true)} className="flex-row items-center gap-3 px-4 py-3">
-          <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-soft">
-            <Timer size={18} color={colors.accent} />
-          </View>
+      <Pressable
+        onPress={() => setExpanded(true)}
+        className="mx-4 mb-2 h-[76px] overflow-hidden rounded-[20px] bg-surface-raised"
+        accessibilityLabel={`Rest ${fmt(remainingMs)} left. Tap for the full timer`}
+      >
+        <Animated.View
+          style={[StyleSheet.absoluteFill, { backgroundColor: fill, transformOrigin: 'left', transform: [{ scaleX: drain }] }]}
+        />
+        <View className="h-full flex-row items-center gap-2.5 pl-[18px] pr-3">
           <View className="flex-1">
+            <Text className="text-[28px] font-bold leading-8 tabular-nums text-ink">{fmt(remainingMs)}</Text>
             <View className="flex-row items-center gap-1">
-              <Text className="text-[11px] font-semibold uppercase tracking-widest text-ink-subtle">
-                {isPaused ? 'Rest paused' : 'Rest'}
+              <Text className="text-[13px] text-zinc-200" numberOfLines={1}>
+                {isPaused ? 'Rest paused' : next ? `Rest, then ${next}` : 'Rest'}
               </Text>
-              {!soundEnabled && <VolumeX size={11} color={colors.subtle} />}
+              {!soundEnabled && <VolumeX size={12} color="#E4E4E7" />}
             </View>
-            <Text className="text-xl font-bold tabular-nums text-ink">{fmt(remainingMs)}</Text>
           </View>
-          <Pressable onPress={() => void adjust(30)} className="rounded-lg bg-surface-elevated px-3 py-2" hitSlop={4}>
+          <Pressable onPress={() => void adjust(30)} className="h-11 justify-center rounded-full bg-black/30 px-3.5" hitSlop={4}>
             <Text className="font-semibold text-ink">+30s</Text>
           </Pressable>
-          <Pressable onPress={skip} className="flex-row items-center gap-1 rounded-lg bg-accent px-3 py-2" hitSlop={4}>
+          <Pressable onPress={skip} className="h-11 justify-center rounded-full bg-ink px-[18px]" hitSlop={4}>
             <Text className="font-bold text-surface">Skip</Text>
-            <SkipForward size={14} color={colors.bg} />
           </Pressable>
-        </Pressable>
-        <View className="h-1 bg-surface-elevated">
-          <View className="h-full bg-accent" style={{ width: `${progress * 100}%` }} />
         </View>
-      </View>
+      </Pressable>
 
       <BottomSheet visible={expanded} animationType="fade" onClose={() => setExpanded(false)} className="items-center gap-6 px-6 pb-10 pt-4">
         <View className="h-1 w-10 rounded-full bg-surface-border" />

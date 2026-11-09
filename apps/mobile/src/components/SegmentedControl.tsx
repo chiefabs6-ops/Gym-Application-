@@ -14,7 +14,7 @@ export function SegmentedControl<T extends string>({
   className?: string;
 }) {
   return (
-    <View className={`flex-row rounded-xl bg-surface-raised p-1 ${className}`}>
+    <View className={`flex-row rounded-full bg-surface-raised p-1 ${className}`}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -25,12 +25,14 @@ export function SegmentedControl<T extends string>({
               void Haptics.selectionAsync();
               onChange(o.value);
             }}
-            className={`flex-1 items-center rounded-lg py-2 ${active ? 'bg-surface-elevated' : ''}`}
+            className={`min-h-10 flex-1 items-center justify-center rounded-full py-2 ${active ? 'bg-ink' : ''}`}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
           >
-            <Text className={`text-sm ${active ? 'font-semibold text-ink' : 'text-ink-muted'}`}>{o.label}</Text>
-            {o.detail !== undefined && <Text className="text-[11px] tabular-nums text-ink-subtle">{o.detail}</Text>}
+            <Text className={`text-sm ${active ? 'font-semibold text-surface' : 'text-ink-muted'}`}>{o.label}</Text>
+            {o.detail !== undefined && (
+              <Text className={`text-[11px] tabular-nums ${active ? 'text-surface/70' : 'text-ink-subtle'}`}>{o.detail}</Text>
+            )}
           </Pressable>
         );
       })}

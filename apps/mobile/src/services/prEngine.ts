@@ -64,6 +64,7 @@ export async function evaluateCompletedSet(setId: string): Promise<PRKind[]> {
 
 export interface SessionSetBests extends PersonalBests {
   set_id: string;
+  exercise_id: string;
   weight_kg: number | null;
   reps: number | null;
   duration_s: number | null;
@@ -90,7 +91,7 @@ export const SESSION_PR_SQL = `
     WHERE ws.id = ? AND s.is_completed = 1 AND s.deleted_at IS NULL AND se.deleted_at IS NULL
   ),
   hist AS (${HISTORY_SETS} AND se.exercise_id IN (SELECT exercise_id FROM cur))
-  SELECT cur.id AS set_id, cur.weight_kg, cur.reps, cur.duration_s, cur.distance_m, cur.set_type, cur.tracking_type,
+  SELECT cur.id AS set_id, cur.exercise_id, cur.weight_kg, cur.reps, cur.duration_s, cur.distance_m, cur.set_type, cur.tracking_type,
          ${BEST_COLUMNS}
   FROM cur
   LEFT JOIN hist h ON h.exercise_id = cur.exercise_id AND h.id <> cur.id
@@ -106,6 +107,13 @@ export function sessionPRs(rows: SessionSetBests[]): Record<string, PRKind[]> {
     if (kinds.length > 0) out[row.set_id] = kinds;
   }
   return out;
+}
+
+/** How many exercises of one session set at least one record (the History list's "2 PRs"). */
+export async function getSessionPRCount(sessionId: string): Promise<number> {
+  const rows = await db.getAllAsync<SessionSetBests>(SESSION_PR_SQL, [sessionId]);
+  const prs = sessionPRs(rows);
+  return new Set(rows.filter((r) => prs[r.set_id]).map((r) => r.exercise_id)).size;
 }
 
 export async function getSessionPRs(sessionId: string): Promise<Record<string, PRKind[]>> {

@@ -39,30 +39,33 @@ export function DiarySummaryCard({
   return (
     <View className="gap-3 rounded-card bg-surface-raised p-4">
       <Text className="text-xs text-ink-muted">Calories remaining</Text>
-      <View className="flex-row items-end justify-between">
+      {/* Goal − Food = Left, centred, with what's left as the big figure. */}
+      <View className="flex-row items-end justify-center gap-3.5">
         <Figure value={n0(targets.kcal)} label="Goal" />
-        <Text className="pb-4 text-ink-subtle">−</Text>
+        <Text className="pb-[18px] text-ink-subtle">−</Text>
         <Figure value={n0(totals.kcal)} label="Food" />
-        <Text className="pb-4 text-ink-subtle">=</Text>
-        <Figure value={n0(left)} label="Left" className={left < 0 ? 'text-settype-failure' : 'text-accent'} />
+        <Text className="pb-[18px] text-ink-subtle">=</Text>
+        <Figure value={n0(left)} label="Left" big className={left < 0 ? 'text-settype-failure' : 'text-accent'} />
       </View>
-      <MacroBar label="Protein" eaten={totals.protein_g} target={targets.protein_g} color="bg-macro-protein" redWhenOver={false} />
-      <MacroBar label="Carbs" eaten={totals.carbs_g} target={targets.carbs_g} color="bg-macro-carbs" />
-      <MacroBar label="Fat" eaten={totals.fat_g} target={targets.fat_g} color="bg-macro-fat" />
+      <View className="mt-0.5 flex-row gap-3">
+        <MacroBar label="Protein" eaten={totals.protein_g} target={targets.protein_g} color="bg-macro-protein" redWhenOver={false} />
+        <MacroBar label="Carbs" eaten={totals.carbs_g} target={targets.carbs_g} color="bg-macro-carbs" />
+        <MacroBar label="Fat" eaten={totals.fat_g} target={targets.fat_g} color="bg-macro-fat" />
+      </View>
     </View>
   );
 }
 
-function Figure({ value, label, className = 'text-ink' }: { value: string; label: string; className?: string }) {
+function Figure({ value, label, big = false, className = 'text-ink' }: { value: string; label: string; big?: boolean; className?: string }) {
   return (
     <View className="items-center">
-      <Text className={`text-xl font-bold tabular-nums ${className}`}>{value}</Text>
+      <Text className={`font-bold tabular-nums ${big ? 'text-[34px] leading-[38px]' : 'text-xl'} ${className}`}>{value}</Text>
       <Text className="text-[11px] text-ink-muted">{label}</Text>
     </View>
   );
 }
 
-/** Over target turns red, except protein (going over on protein isn't a problem; user decision). */
+/** One of three side-by-side columns. Over target turns red, except protein (going over on protein isn't a problem; user decision). */
 function MacroBar({
   label,
   eaten,
@@ -79,14 +82,13 @@ function MacroBar({
   const over = redWhenOver && eaten > target;
   const pct = target > 0 ? Math.min(100, (eaten / target) * 100) : 0;
   return (
-    <View className="gap-1">
-      <View className="flex-row justify-between">
-        <Text className="text-xs text-ink-muted">{label}</Text>
-        <Text className={`text-xs tabular-nums ${over ? 'text-settype-failure' : 'text-ink-muted'}`}>
-          {n0(eaten)} / {n0(target)} g
-        </Text>
-      </View>
-      <View className="h-1.5 overflow-hidden rounded-full bg-surface-elevated">
+    <View className="flex-1 gap-1">
+      <Text className="text-xs text-ink-muted">{label}</Text>
+      <Text className={`text-[15px] font-semibold tabular-nums ${over ? 'text-settype-failure' : 'text-ink'}`}>
+        {n0(eaten)}
+        <Text className="text-xs font-normal text-ink-muted"> / {n0(target)} g</Text>
+      </Text>
+      <View className="h-[5px] overflow-hidden rounded-full bg-surface-elevated">
         <View className={`h-full rounded-full ${over ? 'bg-settype-failure' : color}`} style={{ width: `${pct}%` }} />
       </View>
     </View>

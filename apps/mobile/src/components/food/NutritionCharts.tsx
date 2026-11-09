@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
-import Svg, { Circle, Line, Polyline, Rect } from 'react-native-svg';
-import { toLocalDateKey, type MacroTotals, type Targets } from '@gym/shared';
+import { Pressable, Text, View } from 'react-native';
+import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
+import { toLocalDateKey, type Targets } from '@gym/shared';
 import { useLiveQuery } from '../../db/useLiveQuery';
 import { getTargetsForDate } from '../../db/repositories/body';
-import { chartDays, weeklyAverages, weightVsCalories, type DayTotals } from '../../db/repositories/nutritionStats';
+import { chartDays, weightVsCalories, type DayTotals } from '../../db/repositories/nutritionStats';
 import { useSettingsStore, useUnits } from '../../state/settingsStore';
 import { colors } from '../../theme';
 
 const H = 120;
+const MINI_H = 64;
 const n0 = (v: number) => Math.round(v).toLocaleString();
 const dayLetter = (key: string) => {
   const [y, m, d] = key.split('-').map(Number) as [number, number, number];
   return new Date(y, m - 1, d, 12).toLocaleDateString(undefined, { weekday: 'narrow' });
 };
 
-/** The four nutrition charts in History → Stats (spec §8.5). */
-export function NutritionCharts() {
+/**
+ * History → Stats: the last 7 days of eating in one card (average calories against the target, days over,
+ * protein days hit, and a small bar per day), with the 8-week weight vs calories chart one tap away.
+ */
+export function NutritionSummary() {
   const units = useUnits();
   const nutrition = useSettingsStore((s) => s.nutrition);
   // Re-load whenever the diary or weigh-ins change.
@@ -27,146 +31,91 @@ export function NutritionCharts() {
     ['food_log_entries', 'body_metrics'],
   );
   const [days, setDays] = useState<(DayTotals & { target: Targets | null })[]>([]);
-  const [averages, setAverages] = useState<({ days: number } & MacroTotals) | null>(null);
   const [weeks, setWeeks] = useState<{ week_start: string; avg_kcal: number | null; weight_kg: number | null }[]>([]);
+  const [showWeight, setShowWeight] = useState(false);
   const today = toLocalDateKey(new Date());
 
   useEffect(() => {
     void chartDays(today).then(setDays);
-    void weeklyAverages(today).then(setAverages);
     void weightVsCalories(today).then(setWeeks);
   }, [version[0]?.v, nutrition, today]);
 
   const todayTarget = getTargetsForDate(today);
-  const proteinHit = days.filter((d) => d.local_date !== today && d.kcal > 0 && d.target && d.protein_g >= d.target.protein_g).length;
-  const proteinDays = days.filter((d) => d.local_date !== today && d.kcal > 0).length;
+  // Finished days with something logged; today is still in progress.
+  const logged = days.filter((d) => d.local_date !== today && d.kcal > 0);
+  const avg = logged.length ? logged.reduce((s, d) => s + d.kcal, 0) / logged.length : null;
+  const over = logged.filter((d) => d.target && d.kcal > d.target.kcal).length;
+  const proteinHit = logged.filter((d) => d.target && d.protein_g >= d.target.protein_g).length;
+  const max = Math.max(1, ...days.map((d) => d.kcal), ...days.map((d) => d.target?.kcal ?? 0)) * 1.1;
+  const targetY = todayTarget ? (todayTarget.kcal / max) * MINI_H : null;
 
   return (
-    <View className="gap-4">
-      <Text className="text-sm uppercase tracking-wider text-ink-muted">Nutrition</Text>
-
-      <Card title="Calories this week" subtitle={todayTarget ? `Target ${n0(todayTarget.kcal)} kcal` : undefined}>
-        <DayBars days={days} today={today} value={(d) => d.kcal} target={(d) => d.target?.kcal ?? null} color={colors.accent} />
-        <Legend items={[{ color: colors.accent, label: 'within target' }, { color: colors.danger, label: 'over' }, { color: colors.faint, label: 'today so far' }]} />
-      </Card>
-
-      <Card title="Protein this week" subtitle={todayTarget ? `Target ${n0(todayTarget.protein_g)} g` : undefined}>
-        <DayBars days={days} today={today} value={(d) => d.protein_g} target={(d) => d.target?.protein_g ?? null} color={colors.protein} redWhenOver={false} />
-        {proteinDays > 0 && <Text className="text-xs text-ink-subtle">Hit target on {proteinHit} of {proteinDays} days</Text>}
-      </Card>
-
-      <Card title="Weekly averages" subtitle={averages ? `Last 7 days (${averages.days} logged)` : undefined}>
-        {averages && averages.days > 0 ? (
-          <View className="flex-row flex-wrap gap-2">
-            <Average label="Calories" value={averages.kcal} target={todayTarget?.kcal} unit="" color={colors.accent} />
-            <Average label="Protein" value={averages.protein_g} target={todayTarget?.protein_g} unit=" g" color={colors.protein} />
-            <Average label="Carbs" value={averages.carbs_g} target={todayTarget?.carbs_g} unit=" g" color={colors.carbs} />
-            <Average label="Fat" value={averages.fat_g} target={todayTarget?.fat_g} unit=" g" color={colors.fat} />
-          </View>
-        ) : (
-          <Text className="text-sm text-ink-subtle">Log food to see your averages.</Text>
-        )}
-      </Card>
-
-      <Card title="Weight vs calories" subtitle="Last 8 weeks">
-        <WeightVsCalories weeks={weeks} format={(kg) => units.format(kg, 1)} />
-        <Legend items={[{ color: colors.accent, label: 'weight' }, { color: colors.elevated, label: 'avg calories / day' }]} />
-      </Card>
-    </View>
-  );
-}
-
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <View className="gap-2 rounded-card bg-surface-raised p-4">
-      <View>
-        <Text className="font-semibold text-ink">{title}</Text>
-        {subtitle && <Text className="text-xs text-ink-subtle">{subtitle}</Text>}
+    <View className="mt-2 gap-2">
+      <View className="flex-row items-baseline justify-between px-1">
+        <Text className="text-base font-semibold text-ink">
+          Nutrition <Text className="text-sm font-normal text-ink-muted">last 7 days</Text>
+        </Text>
+        <Pressable onPress={() => setShowWeight((v) => !v)} hitSlop={10}>
+          <Text className="text-sm text-ink-muted">{showWeight ? 'Hide weight trend' : 'Weight trend'}</Text>
+        </Pressable>
       </View>
-      {children}
-    </View>
-  );
-}
 
-function Legend({ items }: { items: { color: string; label: string }[] }) {
-  return (
-    <View className="flex-row flex-wrap gap-3">
-      {items.map((i) => (
-        <View key={i.label} className="flex-row items-center gap-1">
-          <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: i.color }} />
-          <Text className="text-[11px] text-ink-subtle">{i.label}</Text>
+      <View className="flex-row items-center gap-5 rounded-[20px] bg-surface-raised px-5 py-4">
+        <View className="flex-1 gap-1">
+          {avg === null ? (
+            <Text className="text-sm text-ink-muted">Log food to see how your week is going.</Text>
+          ) : (
+            <>
+              <Text className="text-[22px] font-medium leading-7 tabular-nums text-ink">
+                {n0(avg)} <Text className="text-[13px] text-ink-muted">kcal a day</Text>
+              </Text>
+              {todayTarget && (
+                <Text className="text-[13px] text-ink-muted">
+                  Target {n0(todayTarget.kcal)}. Over on {over} of {logged.length} days.
+                </Text>
+              )}
+              {todayTarget && (
+                <Text className="text-[13px] text-ink-muted">
+                  Protein target hit on {proteinHit} of {logged.length} days.
+                </Text>
+              )}
+            </>
+          )}
         </View>
-      ))}
-    </View>
-  );
-}
-
-/** A bar per day; the target as a dashed line per day (each day's own target). */
-function DayBars({
-  days,
-  today,
-  value,
-  target,
-  color,
-  redWhenOver = true,
-}: {
-  days: (DayTotals & { target: Targets | null })[];
-  today: string;
-  value: (d: DayTotals) => number;
-  target: (d: DayTotals & { target: Targets | null }) => number | null;
-  color: string;
-  /** Protein: false (going over isn't a problem; user decision). */
-  redWhenOver?: boolean;
-}) {
-  const [width, setWidth] = useState(0);
-  const max = Math.max(1, ...days.map(value), ...days.map((d) => target(d) ?? 0)) * 1.1;
-  const slot = width / Math.max(1, days.length);
-  const y = (v: number) => H - (v / max) * H;
-  return (
-    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      {width > 0 && (
-        <Svg width={width} height={H}>
-          {days.map((d, i) => {
-            const v = value(d);
-            const t = target(d);
-            const isToday = d.local_date === today;
-            const over = redWhenOver && t !== null && v > t;
-            const fill = isToday ? colors.faint : over ? colors.danger : color;
-            return (
-              <Rect key={d.local_date} x={i * slot + slot * 0.2} y={y(v)} width={slot * 0.6} height={H - y(v)} rx={3} fill={fill} />
-            );
-          })}
-          {days.map((d, i) => {
-            const t = target(d);
-            return t === null ? null : <Line key={`t-${d.local_date}`} x1={i * slot + 2} x2={(i + 1) * slot - 2} y1={y(t)} y2={y(t)} stroke={colors.muted} strokeDasharray="4 3" />;
-          })}
-        </Svg>
-      )}
-      <View className="flex-row">
-        {days.map((d) => (
-          <Text key={d.local_date} className="flex-1 text-center text-[11px] text-ink-subtle">
-            {dayLetter(d.local_date)}
-          </Text>
-        ))}
+        <View className="w-28 gap-1">
+          <View style={{ height: MINI_H }} className="flex-row items-end gap-1">
+            {targetY !== null && (
+              <View className="absolute left-0 right-0 border-t border-dashed border-ink-muted" style={{ bottom: targetY }} />
+            )}
+            {days.map((d) => {
+              const isToday = d.local_date === today;
+              const isOver = d.target !== null && d.kcal > d.target.kcal;
+              return (
+                <View
+                  key={d.local_date}
+                  className={`flex-1 rounded-sm ${isToday ? 'border border-dashed border-ink-muted' : isOver ? 'bg-settype-failure' : 'bg-ink-faint'}`}
+                  style={{ height: Math.max(isToday ? 3 : 0, (d.kcal / max) * MINI_H) }}
+                />
+              );
+            })}
+          </View>
+          <View className="flex-row gap-1">
+            {days.map((d) => (
+              <Text key={d.local_date} className="flex-1 text-center text-[11px] text-ink-muted">
+                {dayLetter(d.local_date)}
+              </Text>
+            ))}
+          </View>
+        </View>
       </View>
-    </View>
-  );
-}
 
-function Average({ label, value, target, unit, color }: { label: string; value: number; target?: number; unit: string; color: string }) {
-  const over = target !== undefined && value > target;
-  const pct = target ? Math.min(100, (value / target) * 100) : 0;
-  return (
-    <View className="min-w-[45%] flex-1 gap-1 rounded-xl bg-surface-elevated p-3">
-      <Text className="text-xs text-ink-muted">{label}</Text>
-      <Text className="tabular-nums text-ink">
-        <Text className="text-lg font-bold">{n0(value)}</Text>
-        {unit}
-        {target !== undefined && <Text className="text-ink-subtle"> / {n0(target)}</Text>}
-      </Text>
-      {target !== undefined && (
-        <View className="h-1.5 overflow-hidden rounded-full bg-surface">
-          <View style={{ width: `${pct}%`, height: '100%', backgroundColor: over ? colors.danger : color }} />
+      {showWeight && (
+        <View className="gap-2 rounded-[20px] bg-surface-raised p-4">
+          <View>
+            <Text className="font-semibold text-ink">Weight vs calories</Text>
+            <Text className="text-xs text-ink-muted">Last 8 weeks: weight as the line, average calories a day as bars</Text>
+          </View>
+          <WeightVsCalories weeks={weeks} format={(kg) => units.format(kg, 1)} />
         </View>
       )}
     </View>
