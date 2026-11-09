@@ -8,7 +8,7 @@ const release = (over: Record<string, unknown> = {}) => ({
   prerelease: false,
   assets: [
     { name: 'notes.txt', browser_download_url: 'https://github.com/x/notes.txt', size: 1 },
-    { name: 'gym-log.apk', browser_download_url: 'https://github.com/o/r/releases/download/v0.3.2/gym-log.apk', size: 1234 },
+    { name: 'gym-log.apk', browser_download_url: 'https://github.com/chiefabs6-ops/Gym-Application-/releases/download/v0.3.2/gym-log.apk', size: 1234 },
   ],
   ...over,
 });
@@ -31,7 +31,7 @@ describe('parseLatestRelease', () => {
   it('picks the gym-log.apk asset', () => {
     expect(parseLatestRelease(release())).toEqual({
       version: '0.3.2',
-      apkUrl: 'https://github.com/o/r/releases/download/v0.3.2/gym-log.apk',
+      apkUrl: 'https://github.com/chiefabs6-ops/Gym-Application-/releases/download/v0.3.2/gym-log.apk',
       title: 'Gym Log 0.3.2',
       sizeBytes: 1234,
     });
@@ -63,6 +63,6 @@ describe('checkForUpdate', () => {
     });
     await expect(checkForUpdate('0.3.1', offline as unknown as typeof fetch)).rejects.toThrow('No internet connection.');
     await expect(checkForUpdate('0.3.1', reply({}, 404) as unknown as typeof fetch)).rejects.toThrow('GitHub error 404.');
-    await expect(checkForUpdate('0.3.1', reply(release({ assets: [] })) as unknown as typeof fetch)).rejects.toThrow('no app file');
+    await expect(checkForUpdate('0.3.1', reply(release({ assets: [] })) as unknown as typeof fetch)).rejects.toThrow('No installable update');
   });
 });

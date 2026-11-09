@@ -5,6 +5,8 @@
  */
 export const RELEASES_LATEST_URL = 'https://api.github.com/repos/chiefabs6-ops/Gym-Application-/releases/latest';
 export const APK_ASSET_NAME = 'gym-log.apk';
+const DOWNLOAD_URL_PREFIX = 'https://github.com/chiefabs6-ops/Gym-Application-/releases/download/';
+const TIMEOUT_MS = 15_000;
 
 export interface AvailableUpdate {
   version: string;
@@ -46,7 +48,7 @@ export function parseLatestRelease(json: unknown): AvailableUpdate | null {
   if (!parseVersion(r.tag_name)) return null;
   const asset = Array.isArray(r.assets) ? r.assets.find((a) => a?.name === APK_ASSET_NAME) : undefined;
   const url = asset?.browser_download_url;
-  if (typeof url !== 'string' || !url.startsWith('https://github.com/')) return null;
+  if (typeof url !== 'string' || !url.startsWith(DOWNLOAD_URL_PREFIX)) return null;
   return {
     version: r.tag_name.trim().replace(/^v/, ''),
     apkUrl: url,
@@ -59,15 +61,21 @@ export type UpdateCheck = { kind: 'up-to-date'; latest: string } | { kind: 'avai
 
 /** Asks GitHub for the newest release. Throws a short, user-readable Error when offline or GitHub fails. */
 export async function checkForUpdate(currentVersion: string, fetchImpl: typeof fetch = fetch): Promise<UpdateCheck> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
+  let json: unknown;
   try {
-    res = await fetchImpl(RELEASES_LATEST_URL, { headers: { Accept: 'application/vnd.github+json' } });
+    res = await fetchImpl(RELEASES_LATEST_URL, { headers: { Accept: 'application/vnd.github+json' }, signal: controller.signal });
+    json = res.ok ? await res.json() : null;
   } catch {
     throw new Error('No internet connection.');
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) throw new Error(res.status === 403 ? 'GitHub is busy, try again later.' : `GitHub error ${res.status}.`);
-  const update = parseLatestRelease(await res.json());
-  if (!update) throw new Error('The latest release has no app file.');
+  const update = parseLatestRelease(json);
+  if (!update) throw new Error('No installable update found on GitHub.');
   return compareVersions(update.version, currentVersion) > 0
     ? { kind: 'available', update }
     : { kind: 'up-to-date', latest: update.version };
