@@ -18,3 +18,4 @@ export * from './nutrition';
 export * from './targets';
 export * from './labelParser';
 export * from './foodForm';
+export * from './trainingStats';

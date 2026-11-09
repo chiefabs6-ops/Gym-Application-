@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -43,7 +43,21 @@ export default function FoodScreen() {
   const setMeal = useFoodUiStore((s) => s.setLastMeal);
   const setLateNightChoice = useFoodUiStore((s) => s.setLateNightChoice);
 
-  const [date, setDate] = useState(() => toLocalDateKey(new Date()));
+  const [date, setDateState] = useState(() => toLocalDateKey(new Date()));
+  // The calendar day the app last set the date to, while the user hasn't picked another day (null = user picked one).
+  const followedToday = useRef<string | null>(toLocalDateKey(new Date()));
+  const setDate = useCallback((d: string) => {
+    followedToday.current = d === toLocalDateKey(new Date()) ? d : null;
+    setDateState(d);
+  }, []);
+  /** Overnight: if the date was "today" when set and the calendar day has changed, move to the new today. */
+  const rollToToday = useCallback(() => {
+    const today = toLocalDateKey(new Date());
+    if (followedToday.current !== null && followedToday.current !== today) {
+      followedToday.current = today;
+      setDateState(today);
+    }
+  }, []);
   const [picking, setPicking] = useState(false);
   const [askLateNight, setAskLateNight] = useState(false);
   const [askRecalc, setAskRecalc] = useState(false);
@@ -63,16 +77,18 @@ export default function FoodScreen() {
           ui.setLateNightChoice(null);
           setDate(toLocalDateKey(new Date()));
         }
+        rollToToday();
         void shouldPromptRecalc(new Date()).then(setAskRecalc);
       } else if (ui.lateNightChoice === null) setAskLateNight(true);
-    }, []),
+    }, [setDate, rollToToday]),
   );
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') useFoodUiStore.getState().setLateNightChoice(null);
+      else if (state === 'active' && !isLateNight(new Date())) rollToToday();
     });
     return () => sub.remove();
-  }, []);
+  }, [rollToToday]);
 
   const { data: entries } = useLiveQuery<FoodLogEntryRow>(
     `SELECT * FROM food_log_entries WHERE local_date = ? AND deleted_at IS NULL ORDER BY logged_at, rowid`,
@@ -146,18 +162,26 @@ export default function FoodScreen() {
         />
 
         <View className="rounded-card bg-surface-raised">
-          <View className="flex-row items-center justify-between px-4 pb-2 pt-3">
-            <Text className="font-semibold text-ink">{MEAL_LABELS[meal]}</Text>
-            <View className="flex-row items-center gap-3">
-              <Text className="text-xs tabular-nums text-ink-muted">
+          <View className="flex-row items-center gap-2 pb-2 pl-4 pr-3 pt-2.5">
+            <Text className="flex-1 font-semibold text-ink" numberOfLines={1}>
+              {MEAL_LABELS[meal]}
+              {'  '}
+              <Text className="text-xs font-normal tabular-nums text-ink-muted">
                 {n0(mealTotals.kcal)} kcal · <Text className="text-macro-protein">{n0(mealTotals.protein_g)} g protein</Text>
               </Text>
-              {mealEntries.length > 0 && (
-                <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel={`${MEAL_LABELS[meal]} options`}>
-                  <MoreHorizontal size={20} color={colors.muted} />
-                </Pressable>
-              )}
-            </View>
+            </Text>
+            {mealEntries.length > 0 && (
+              <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} className="px-1.5" accessibilityLabel={`${MEAL_LABELS[meal]} options`}>
+                <MoreHorizontal size={20} color={colors.muted} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => router.push({ pathname: '/food/add', params: { meal, date } })}
+              className="h-9 w-9 items-center justify-center rounded-full bg-accent-soft active:opacity-70"
+              accessibilityLabel={`Add food to ${MEAL_LABELS[meal]}`}
+            >
+              <Plus size={16} color={colors.accent} strokeWidth={2.5} />
+            </Pressable>
           </View>
           {mealEntries.map((e) => (
             <Pressable
@@ -176,13 +200,6 @@ export default function FoodScreen() {
               <Text className="tabular-nums text-ink">{n0(e.kcal)}</Text>
             </Pressable>
           ))}
-          <Pressable
-            onPress={() => router.push({ pathname: '/food/add', params: { meal, date } })}
-            className="flex-row items-center gap-2 border-t border-surface-border px-4 py-3 active:bg-surface-elevated"
-          >
-            <Plus size={16} color={colors.accent} />
-            <Text className="font-semibold text-accent">Add food</Text>
-          </Pressable>
         </View>
       </ScrollView>
 
@@ -212,8 +229,8 @@ export default function FoodScreen() {
         message="Your weight has changed since your targets were set. Recalculate your edited targets?"
         onClose={() => setAskRecalc(false)}
         choices={[
-          { label: 'Recalculate', tone: 'primary', onPress: () => void markPrompted(new Date()).then(() => acceptRecalcPrompt()) },
-          { label: 'Keep mine', onPress: () => void markPrompted(new Date()) },
+          { label: 'Recalculate', tone: 'primary', onPress: () => void markPrompted(new Date()).then(() => acceptRecalcPrompt()).catch(saveFailed) },
+          { label: 'Keep mine', onPress: () => void markPrompted(new Date()).catch(saveFailed) },
         ]}
       />
 
@@ -235,7 +252,9 @@ export default function FoodScreen() {
         fromDate={date}
         fromMeal={meal}
         onCopy={(ids, to) => {
-          void copyEntries(ids, to).catch(saveFailed).then(() => showToast({ message: `Copied ${ids.length} ${ids.length === 1 ? 'item' : 'items'} to ${formatDayKey(to.localDate)}` }));
+          void copyEntries(ids, to)
+            .then(() => showToast({ message: `Copied ${ids.length} ${ids.length === 1 ? 'item' : 'items'} to ${formatDayKey(to.localDate)}` }))
+            .catch(saveFailed);
         }}
         onClose={() => setCopy(null)}
       />
@@ -244,7 +263,7 @@ export default function FoodScreen() {
         visible={savingMeal}
         entries={pickable}
         defaultName={`${MEAL_LABELS[meal]} ${formatDayKey(date)}`}
-        onSave={(name, ids) => void saveMeal(name, ids).then(() => showToast({ message: `Saved "${name}"` }))}
+        onSave={(name, ids) => void saveMeal(name, ids).then(() => showToast({ message: `Saved "${name}"` })).catch(saveFailed)}
         onClose={() => setSavingMeal(false)}
       />
 

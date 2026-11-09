@@ -4,7 +4,16 @@ import { useSettingsStore } from '../state/settingsStore';
 import { colors } from '../theme';
 
 /** "Which plan day is this?" chips: No day + one per day of the training plan. Hidden with no plan. */
-export function PlanDayPicker({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {
+export function PlanDayPicker({
+  value,
+  onChange,
+  showIcon = true,
+}: {
+  value: string | null;
+  onChange: (id: string | null) => void;
+  /** false when a "Plan day" label already names the row. */
+  showIcon?: boolean;
+}) {
   const plan = useSettingsStore((s) => s.training_plan);
   if (!plan) return null;
   const options = [{ id: null as string | null, name: 'No day' }, ...plan.days];
@@ -15,7 +24,7 @@ export function PlanDayPicker({ value, onChange }: { value: string | null; onCha
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ gap: 8, alignItems: 'center' }}
     >
-      <CalendarDays size={16} color={colors.subtle} />
+      {showIcon && <CalendarDays size={16} color={colors.subtle} />}
       {options.map((d) => {
         const active = value === d.id;
         return (
@@ -24,7 +33,7 @@ export function PlanDayPicker({ value, onChange }: { value: string | null; onCha
             onPress={() => onChange(d.id)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            className={`rounded-full border px-3 py-1.5 ${active ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-raised'}`}
+            className={`rounded-full border px-3.5 py-2 ${active ? 'border-accent bg-accent-soft' : 'border-surface-raised bg-surface-raised'}`}
           >
             <Text className={`text-sm ${active ? 'font-semibold text-accent' : 'text-ink-muted'}`}>{d.name}</Text>
           </Pressable>

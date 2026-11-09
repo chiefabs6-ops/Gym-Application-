@@ -142,11 +142,13 @@ export const useActiveWorkoutStore = create<ActiveWorkoutState>()(
       },
 
       completeSet: async (setId, restSeconds) => {
-        const { sessionId } = get();
+        // The page on screen when the set was ticked: a swipe after this cancels the auto-advance below.
+        const { sessionId, currentIndex: fromIndex } = get();
         if (!sessionId) return;
-        const rows = await db.getAllAsync<{ se_id: string; g: string | null; set_id: string; done: number }>(
+        // LEFT JOIN: exercises without sets still count, so indexes match the workout pager.
+        const rows = await db.getAllAsync<{ se_id: string; g: string | null; set_id: string | null; done: number | null }>(
           `SELECT se.id AS se_id, se.superset_group AS g, s.id AS set_id, s.is_completed AS done
-           FROM session_exercises se JOIN sets s ON s.session_exercise_id = se.id AND s.deleted_at IS NULL
+           FROM session_exercises se LEFT JOIN sets s ON s.session_exercise_id = se.id AND s.deleted_at IS NULL
            WHERE se.session_id = ? AND se.deleted_at IS NULL ORDER BY se.order_index, s.order_index`,
           [sessionId],
         );
@@ -156,14 +158,24 @@ export const useActiveWorkoutStore = create<ActiveWorkoutState>()(
         const flow =
           at >= 0
             ? afterSetCompleted(groups, at, (i) =>
-                rows.some((r) => r.se_id === exercises[i] && r.done === 0 && r.set_id !== setId),
+                rows.some((r) => r.se_id === exercises[i] && r.set_id !== null && r.done === 0 && r.set_id !== setId),
               )
             : { skipRest: false, nextIndex: null };
         await get().toggleSetComplete(setId, true, restSeconds, { skipRest: flow.skipRest });
-        // A short beat so the tick animation is seen before the next superset exercise slides in.
+        // A short beat so the tick animation is seen before the next exercise (superset member, or the exercise
+        // after a finished one) slides in. Skipped if the user moved or unticked the set in the meantime.
         if (flow.nextIndex !== null) {
           const next = flow.nextIndex;
-          setTimeout(() => get().sessionId === sessionId && set({ currentIndex: next }), 450);
+          setTimeout(() => {
+            if (get().sessionId !== sessionId || get().currentIndex !== fromIndex) return;
+            void db
+              .getFirstAsync<{ done: number }>(`SELECT is_completed AS done FROM sets WHERE id = ?`, [setId])
+              .then((r) => {
+                if (r?.done === 1 && get().sessionId === sessionId && get().currentIndex === fromIndex) {
+                  set({ currentIndex: next });
+                }
+              });
+          }, 450);
         }
       },
 

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { ChevronRight, ShieldAlert } from 'lucide-react-native';
+import { ShieldAlert } from 'lucide-react-native';
 import { needsBackupReminder } from '../services/backup';
 import { colors } from '../theme';
 
@@ -18,15 +18,12 @@ export function BackupReminder() {
   return (
     <Pressable
       onPress={() => router.navigate('/settings')}
-      className="flex-row items-center gap-3 rounded-card border border-pr/30 bg-pr/10 p-4 active:opacity-80"
+      className="min-h-12 flex-row items-center gap-2.5 rounded-2xl bg-pr/10 px-3.5 py-2 active:opacity-80"
       accessibilityLabel="Back up your workouts"
     >
-      <ShieldAlert size={20} color={colors.pr} />
-      <View className="flex-1">
-        <Text className="font-semibold text-ink">Back up your workouts</Text>
-        <Text className="text-xs text-ink-muted">They’re only stored on this phone. Turn on automatic backups.</Text>
-      </View>
-      <ChevronRight size={18} color={colors.pr} />
+      <ShieldAlert size={16} color={colors.pr} />
+      <Text className="flex-1 text-sm text-ink">Only on this phone. No recent backup.</Text>
+      <Text className="text-sm font-semibold text-pr">Back up</Text>
     </Pressable>
   );
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
-import { ArrowLeftRight, CheckCircle2, ChevronDown, ChevronUp, Circle, Link2, Plus, Trash2, Unlink } from 'lucide-react-native';
+import { Animated, Pressable, ScrollView, Text, View } from 'react-native';
+import { ArrowLeftRight, CheckCircle2, Circle, Link2, Plus, Trash2, Unlink } from 'lucide-react-native';
 import { isLinkedWithNext } from '@gym/shared';
 import { colors } from '../theme';
 import { ConfirmSheet, type ConfirmRequest } from './ConfirmSheet';
 import { BottomSheet } from './BottomSheet';
+import { DragHandle, useDragReorder } from './DragReorder';
 
 export interface OverviewItem {
   id: string;
@@ -26,11 +27,12 @@ interface Props {
   /** Superset group per exercise (same order as items) and a handler to link/unlink i with i + 1. */
   groups?: readonly (string | null)[];
   onToggleLink?: (index: number) => void;
-  onMove?: (index: number, delta: -1 | 1) => void;
+  /** Drag and drop: move the exercise at `from` to `to`. */
+  onReorder?: (from: number, to: number) => void;
   onReplace?: (sessionExerciseId: string) => void;
 }
 
-/** Drawer listing the whole workout: jump to any exercise, add or remove exercises. */
+/** Drawer listing the whole workout: jump to any exercise, drag to reorder, add or remove exercises. */
 export function WorkoutOverviewSheet({
   visible,
   items,
@@ -41,7 +43,7 @@ export function WorkoutOverviewSheet({
   onRemove,
   groups = [],
   onToggleLink,
-  onMove,
+  onReorder,
   onReplace,
 }: Props) {
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
@@ -57,6 +59,8 @@ export function WorkoutOverviewSheet({
       onConfirm: () => onRemove(item.id),
     });
 
+  const reorder = useDragReorder(items.length, (from, to) => onReorder?.(from, to));
+
   return (
     <>
     <BottomSheet visible={visible} animationType="slide" onClose={onClose} className="max-h-[80%] pb-6">
@@ -68,24 +72,29 @@ export function WorkoutOverviewSheet({
         </Text>
       </View>
 
-      <FlatList
+      <ScrollView
         style={{ flexShrink: 1 }}
-        data={items}
-        keyExtractor={(i) => i.id}
+        scrollEnabled={!reorder.dragging}
         contentContainerStyle={{ paddingHorizontal: 12 }}
-        renderItem={({ item, index }) => {
+      >
+        {items.map((item, index) => {
           const current = index === currentIndex;
           const complete = item.total > 0 && item.done === item.total;
           const linked = isLinkedWithNext(groups, index);
+          const dragging = reorder.drag?.from === index;
           return (
-            <View>
+            <Animated.View key={item.id} onLayout={reorder.measure(index)} style={reorder.rowStyle(index)}>
             <Pressable
               onPress={() => onJump(index)}
               onLongPress={() => confirmRemove(item)}
-              className={`flex-row items-center gap-3 rounded-xl px-3 py-3 ${
-                current ? 'border border-accent/40 bg-accent-soft' : 'bg-surface-elevated'
+              className={`flex-row items-center gap-2.5 rounded-xl py-3 pl-1.5 pr-3 ${
+                dragging ? 'bg-surface-border' : current ? 'border border-accent/40 bg-accent-soft' : 'bg-surface-elevated'
               }`}
+              style={dragging ? { shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 12, shadowOffset: { width: 0, height: 8 } } : undefined}
             >
+              {onReorder && items.length > 1 && (
+                <DragHandle label={`Drag ${item.name} to reorder`} active={dragging} {...reorder.handlers(index)} />
+              )}
               {complete ? <CheckCircle2 size={20} color={colors.accent} /> : <Circle size={20} color={colors.faint} />}
               <View className="flex-1">
                 <Text className={`font-semibold ${current ? 'text-accent' : 'text-ink'}`} numberOfLines={1}>
@@ -96,16 +105,6 @@ export function WorkoutOverviewSheet({
                   {item.done}/{item.total} sets done
                 </Text>
               </View>
-              {onMove && (
-                <View className="flex-row gap-1">
-                  <RowIcon label={`Move ${item.name} up`} disabled={index === 0} onPress={() => onMove(index, -1)}>
-                    <ChevronUp size={16} color={colors.muted} />
-                  </RowIcon>
-                  <RowIcon label={`Move ${item.name} down`} disabled={index === items.length - 1} onPress={() => onMove(index, 1)}>
-                    <ChevronDown size={16} color={colors.muted} />
-                  </RowIcon>
-                </View>
-              )}
               {onReplace && (
                 <RowIcon label={`Replace ${item.name}`} onPress={() => onReplace(item.id)}>
                   <ArrowLeftRight size={15} color={colors.muted} />
@@ -119,7 +118,7 @@ export function WorkoutOverviewSheet({
               <Pressable
                 onPress={() => onToggleLink(index)}
                 hitSlop={4}
-                className="flex-row items-center justify-center gap-1.5 py-1.5"
+                className={`flex-row items-center justify-center gap-1.5 py-1.5 ${reorder.dragging ? 'opacity-0' : ''}`}
                 accessibilityLabel={linked ? 'Unlink superset' : 'Superset with next exercise'}
               >
                 {linked ? <Unlink size={13} color={colors.superset} /> : <Link2 size={13} color={colors.faint} />}
@@ -130,19 +129,17 @@ export function WorkoutOverviewSheet({
             ) : (
               <View className="h-1.5" />
             )}
-            </View>
+            </Animated.View>
           );
-        }}
-        ListFooterComponent={
-          <Pressable
-            onPress={onAddExercise}
-            className="mt-2 flex-row items-center justify-center gap-2 rounded-xl border border-dashed border-accent/50 py-3"
-          >
-            <Plus size={18} color={colors.accent} />
-            <Text className="font-semibold text-accent">Add exercise</Text>
-          </Pressable>
-        }
-      />
+        })}
+        <Pressable
+          onPress={onAddExercise}
+          className="mt-2 flex-row items-center justify-center gap-2 rounded-xl border border-dashed border-accent/50 py-3"
+        >
+          <Plus size={18} color={colors.accent} />
+          <Text className="font-semibold text-accent">Add exercise</Text>
+        </Pressable>
+      </ScrollView>
     </BottomSheet>
       <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
     </>

@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { PlusCircle, ScanBarcode, Search, X, Zap } from 'lucide-react-native';
 import { MEAL_LABELS, MEALS, toLocalDateKey, type Meal, type Serving } from '@gym/shared';
-import { searchLocalFoods, type LocalFoodHit } from '../db/repositories/builtinFoods';
+import { searchLocalFoods, type FoodRef, type LocalFoodHit } from '../db/repositories/builtinFoods';
+import { useLiveQuery } from '../db/useLiveQuery';
 import {
   deleteEntry,
   frequentFoods,
@@ -70,6 +71,27 @@ export default function AddFoodScreen() {
   const [recipeError, setRecipeError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const onlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestQuery = useRef(''); // online results only apply while their query is still the one typed
+  const insets = useSafeAreaInsets();
+
+  // What this visit has added to the meal: entries logged since the screen opened (Undo removes them again).
+  const openedAt = useRef(Date.now()).current;
+  const { data: addedNow } = useLiveQuery<{ food_id: string | null; builtin_food_id: string | null; kcal: number; protein_g: number | null }>(
+    `SELECT food_id, builtin_food_id, kcal, protein_g FROM food_log_entries
+     WHERE local_date = ? AND meal = ? AND deleted_at IS NULL AND logged_at >= ?`,
+    [date, meal, openedAt],
+    ['food_log_entries'],
+  );
+  const addedKeys = useMemo(
+    () =>
+      new Set(
+        addedNow.flatMap((e) => [e.food_id ? `food:${e.food_id}` : null, e.builtin_food_id ? `builtin:${e.builtin_food_id}` : null]),
+      ),
+    [addedNow],
+  );
+  const isAdded = (ref: FoodRef) => addedKeys.has(`${ref.kind}:${ref.id}`);
+  const addedKcal = addedNow.reduce((s, e) => s + e.kcal, 0);
+  const addedProtein = addedNow.reduce((s, e) => s + (e.protein_g ?? 0), 0);
 
   const refreshLists = useCallback(() => {
     void recentFoods(meal, date).then(setRecent);
@@ -82,6 +104,7 @@ export default function AddFoodScreen() {
   // Local results on every keystroke; Open Food Facts after a 1-second pause or on submit (spec §5.2).
   useEffect(() => {
     const q = query.trim();
+    latestQuery.current = q;
     if (onlineTimer.current) clearTimeout(onlineTimer.current);
     setOnline(null);
     if (q === '') {
@@ -98,9 +121,12 @@ export default function AddFoodScreen() {
   }, [query]);
 
   const runOnline = async (q: string) => {
+    if (onlineTimer.current) clearTimeout(onlineTimer.current); // search pressed while the debounce is pending
+    onlineTimer.current = null;
+    latestQuery.current = q;
     setOnline('loading');
     const r = await searchProducts(q);
-    setOnline(r);
+    if (latestQuery.current === q) setOnline(r);
   };
 
   /** Toast with Undo. Batch portions undo through deleteBatchEntry so a finished batch reopens. */
@@ -167,7 +193,7 @@ export default function AddFoodScreen() {
           onChangeText={setQuery}
           onSubmitEditing={() => query.trim().length >= 1 && void runOnline(query.trim())}
           placeholder="Search foods or brands"
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.subtle}
           returnKeyType="search"
           className="flex-1 py-3 text-base text-ink"
           autoCorrect={false}
@@ -180,11 +206,11 @@ export default function AddFoodScreen() {
       </View>
 
       <View className="mx-4 mt-3 flex-row gap-2">
-        <Action icon={<ScanBarcode size={16} color={colors.ink} />} label="Scan barcode" onPress={() => router.push({ pathname: '/food/scan', params: { meal, date } })} />
+        <Action icon={<ScanBarcode size={16} color={colors.ink} />} label="Scan" onPress={() => router.push({ pathname: '/food/scan', params: { meal, date } })} />
         <Action icon={<Zap size={16} color={colors.ink} />} label="Quick add" onPress={() => setQuick(true)} />
         <Action
           icon={<PlusCircle size={16} color={colors.ink} />}
-          label="Create food"
+          label="Create"
           onPress={() => {
             useFoodFormDraftStore.getState().set(null, { meal, date });
             router.push({ pathname: '/food/edit', params: { mode: 'new', name: query.trim() } });
@@ -192,7 +218,7 @@ export default function AddFoodScreen() {
         />
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 140 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: addedNow.length > 0 ? 120 : 40 }}>
         {!typing && (
           <>
             {leftovers.length > 0 && <SectionTitle title="Leftovers" />}
@@ -207,14 +233,14 @@ export default function AddFoodScreen() {
                     title: 'Mark batch finished?',
                     message: `${l.recipeName} (${n0(l.remainingG)} g left) will no longer show as a leftover.`,
                     confirmLabel: 'Mark finished',
-                    onConfirm: () => void finishBatch(l.batchId).then(refreshLists),
+                    onConfirm: () => void finishBatch(l.batchId).then(refreshLists).catch(saveFailed),
                   })
                 }
               />
             ))}
             {recent.length > 0 && <SectionTitle title={`Recent at ${MEAL_LABELS[meal].toLowerCase()}`} />}
             {recent.map((r) => (
-              <RecentRow key={`${r.ref.kind}:${r.ref.id}`} food={r} onAdd={() => void logRecent(r).then((id) => added(r.name, [id])).catch(saveFailed)} onPress={() => void openRecent(r)} />
+              <RecentRow key={`${r.ref.kind}:${r.ref.id}`} food={r} added={isAdded(r.ref)} onAdd={() => void logRecent(r).then((id) => added(r.name, [id])).catch(saveFailed)} onPress={() => void openRecent(r)} />
             ))}
             {saved.length > 0 && <SectionTitle title="Saved meals" />}
             {saved.map((m) => (
@@ -228,7 +254,7 @@ export default function AddFoodScreen() {
             ))}
             {frequent.length > 0 && <SectionTitle title="Frequent" />}
             {frequent.map((r) => (
-              <RecentRow key={`f-${r.ref.kind}:${r.ref.id}`} food={r} onAdd={() => void logRecent(r).then((id) => added(r.name, [id])).catch(saveFailed)} onPress={() => void openRecent(r)} />
+              <RecentRow key={`f-${r.ref.kind}:${r.ref.id}`} food={r} added={isAdded(r.ref)} onAdd={() => void logRecent(r).then((id) => added(r.name, [id])).catch(saveFailed)} onPress={() => void openRecent(r)} />
             ))}
             {leftovers.length + recent.length + saved.length + frequent.length === 0 && (
               <Text className="px-4 pt-6 text-center text-ink-subtle">Search for a food to get started.</Text>
@@ -258,6 +284,7 @@ export default function AddFoodScreen() {
                 detail={`${n0(h.per100.kcal)} kcal · ${n0(h.per100.protein_g)} g protein per 100 ${h.basis}${h.ref.kind === 'food' ? ' · My food' : ''}`}
                 onPress={() => void lastServing(h.ref).then((last) => setPortion({ kind: 'food', hit: h, initial: last ?? undefined }))}
                 onAdd={() => void quickLog(h.ref, h.name, h.per100, h.servings, h.basis).catch(saveFailed)}
+                added={isAdded(h.ref)}
               />
             ))}
             <SectionTitle title="Online (Open Food Facts)" />
@@ -277,6 +304,25 @@ export default function AddFoodScreen() {
           </>
         )}
       </ScrollView>
+
+      {addedNow.length > 0 && (
+        <View
+          className="absolute left-3 right-3 flex-row items-center gap-3 rounded-[20px] bg-surface-raised py-2.5 pl-4 pr-2.5"
+          style={{ bottom: insets.bottom + 16, shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 12, shadowOffset: { width: 0, height: 8 }, elevation: 10 }}
+        >
+          <View className="flex-1">
+            <Text className="text-[15px] font-semibold text-ink">
+              {addedNow.length} added to {MEAL_LABELS[meal].toLowerCase()}
+            </Text>
+            <Text className="text-xs tabular-nums text-ink-muted">
+              {n0(addedKcal)} kcal · <Text className="text-macro-protein">{n0(addedProtein)} g protein</Text>
+            </Text>
+          </View>
+          <Pressable onPress={() => router.back()} className="h-11 justify-center rounded-full bg-accent px-[22px] active:opacity-80">
+            <Text className="font-bold text-surface">Done</Text>
+          </Pressable>
+        </View>
+      )}
 
       <PortionSheet
         visible={portion !== null}
@@ -314,7 +360,7 @@ export default function AddFoodScreen() {
         onClose={() => setQuick(false)}
       />
 
-      <RecipeLogSheet visible={recipe !== null} recipeName={recipe?.name ?? ''} meal={meal} error={recipeError} onSubmit={(c) => void logRecipe(c)} onClose={() => setRecipe(null)} />
+      <RecipeLogSheet visible={recipe !== null} recipeName={recipe?.name ?? ''} meal={meal} error={recipeError} onSubmit={logRecipe} onClose={() => setRecipe(null)} />
 
       <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
     </SafeAreaView>
@@ -330,16 +376,24 @@ export default function AddFoodScreen() {
   }
 }
 
-function RecentRow({ food, onAdd, onPress }: { food: RecentFood; onAdd: () => void; onPress: () => void }) {
+function RecentRow({ food, added, onAdd, onPress }: { food: RecentFood; added: boolean; onAdd: () => void; onPress: () => void }) {
   const amount = food.servings === 1 ? food.serving.label : `${Number(food.servings.toFixed(2))} × ${food.serving.label}`;
-  return <FoodSearchRow title={food.name} detail={`${amount} · ${n0(food.kcal)} kcal · ${n0(food.protein_g)} g protein`} onPress={onPress} onAdd={onAdd} />;
+  return (
+    <FoodSearchRow
+      title={food.name}
+      detail={`${amount} · ${n0(food.kcal)} kcal · ${n0(food.protein_g)} g protein`}
+      onPress={onPress}
+      onAdd={onAdd}
+      added={added}
+    />
+  );
 }
 
 function Action({ icon, label, onPress }: { icon: ReactNode; label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} className="flex-1 items-center gap-1 rounded-xl border border-surface-border bg-surface-raised py-2 active:opacity-70">
+    <Pressable onPress={onPress} className="h-[52px] flex-1 flex-row items-center justify-center gap-1.5 rounded-[14px] bg-surface-raised active:opacity-70">
       {icon}
-      <Text className="text-[11px] font-semibold text-ink">{label}</Text>
+      <Text className="text-[13px] font-semibold text-ink">{label}</Text>
     </Pressable>
   );
 }

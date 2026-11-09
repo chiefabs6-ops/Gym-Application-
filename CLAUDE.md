@@ -15,6 +15,8 @@ checklist, and tick items (with date) only after verifying them on the emulator/
 Docker, sync enablement); it is deferred to ROADMAP Phase 8. Keep the existing sync code intact but unused.
 **Exception (2026-10-26, ROADMAP 2.15):** food search and barcode lookup use Open Food Facts online; anything fetched
 is saved on the phone. Everything else (built-in foods, diary, targets, weight) stays offline.
+**Exception (2026-11-09):** Settings → "Check for update" reads the latest GitHub release and downloads its APK, only
+when tapped (see `docs/release-apk.md`).
 
 ## More docs (read only when relevant)
 - `docs/release-apk.md`: building and installing the release APK on the phone (JAVA_HOME, prebuild, keystore, metro quirk, permissions, icons).

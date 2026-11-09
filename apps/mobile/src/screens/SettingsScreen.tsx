@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Constants from 'expo-constants';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Dumbbell, Info, Ruler, Timer, WifiOff } from 'lucide-react-native';
 import { REST_SECONDS_MAX, REST_SECONDS_MIN } from '@gym/shared';
@@ -11,6 +10,7 @@ import { DurationInputSheet } from '../components/DurationInputSheet';
 import { CloudAccountSection } from '../components/CloudAccountSection';
 import { SegmentedRow, SettingsCard, StepperRow, ToggleRow } from '../components/SettingsControls';
 import { TrainingPlanSection } from '../components/TrainingPlanSection';
+import { UpdateRow } from '../components/UpdateRow';
 import { CLOUD_SYNC_ENABLED } from '../config';
 import { clearCrashLog, readCrashLog, shareCrashLog } from '../services/crashLog';
 import { useSettingsStore } from '../state/settingsStore';
@@ -146,7 +146,7 @@ export default function SettingsScreen() {
                 </Text>
               </View>
             )}
-            <Text className="text-sm text-ink-muted">Gym Log {Constants.expoConfig?.version ?? ''}</Text>
+            <UpdateRow />
             <ErrorReportsRow />
             <Text className="text-[11px] leading-4 text-ink-faint">
               Exercise illustrations: exercise data by RepDB (repdb.co), recoloured.

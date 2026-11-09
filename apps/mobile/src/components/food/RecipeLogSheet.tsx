@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { MEAL_LABELS, parseDecimal, type Meal } from '@gym/shared';
 import { colors } from '../../theme';
@@ -23,17 +23,33 @@ export function RecipeLogSheet({
   recipeName: string;
   meal: Meal;
   error: string | null;
-  onSubmit: (choice: RecipeLogChoice) => void;
+  onSubmit: (choice: RecipeLogChoice) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [kind, setKind] = useState<'oneoff' | 'batch'>('batch');
   const [cooked, setCooked] = useState('');
   const [portion, setPortion] = useState('');
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false); // a double tap must log once
   useEffect(() => {
     if (!visible) return;
     setCooked('');
     setPortion('');
+    busyRef.current = false;
+    setBusy(false);
   }, [visible]);
+
+  const submit = async (choice: RecipeLogChoice) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onSubmit(choice);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
 
   const c = parseDecimal(cooked);
   const p = parseDecimal(portion);
@@ -66,9 +82,9 @@ export function RecipeLogSheet({
         </View>
         {(tooMuch || error) && <Text className="text-xs text-settype-failure">{tooMuch ? 'You can’t eat more than the cooked weight.' : error}</Text>}
         <Pressable
-          disabled={invalid}
-          onPress={() => c && p && onSubmit({ kind, cookedWeightG: c, portionG: p })}
-          className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}
+          disabled={invalid || busy}
+          onPress={() => c && p && void submit({ kind, cookedWeightG: c, portionG: p })}
+          className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid || busy ? 'opacity-40' : 'active:opacity-80'}`}
         >
           <Text className="text-base font-bold text-surface">Add to {MEAL_LABELS[meal]}</Text>
         </Pressable>

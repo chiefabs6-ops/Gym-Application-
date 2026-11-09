@@ -97,8 +97,10 @@ export function unlinkFromNext(groups: GroupList, index: number, makeId: () => s
 /**
  * What happens after a set of exercise `at` is ticked. Inside a superset: go straight to the next member that
  * still has sets this round (no rest yet); after the last one, rest and go back to the first member with sets
- * left. Outside a superset (or nothing left to move to): rest, stay. `hasOpenSets(i)` must already treat the
- * just-ticked set as done.
+ * left. Outside a superset: rest, stay while the exercise has sets left. Once the exercise (or the whole superset)
+ * has no sets left: rest and move on to the next exercise after it that still has sets to do; if there is none
+ * (e.g. the last exercise), rest and stay.
+ * `hasOpenSets(i)` must already treat the just-ticked set as done.
  */
 export function afterSetCompleted(
   groups: GroupList,
@@ -106,10 +108,18 @@ export function afterSetCompleted(
   hasOpenSets: (index: number) => boolean,
 ): { skipRest: boolean; nextIndex: number | null } {
   const members = supersetMembers(groups, at);
-  if (members.length < 2) return { skipRest: false, nextIndex: null };
-  const pos = members.indexOf(at);
-  const later = members.slice(pos + 1).find(hasOpenSets);
-  if (later !== undefined) return { skipRest: true, nextIndex: later };
-  const first = members.find(hasOpenSets);
-  return { skipRest: false, nextIndex: first !== undefined && first !== at ? first : null };
+  if (members.length >= 2) {
+    const pos = members.indexOf(at);
+    const later = members.slice(pos + 1).find(hasOpenSets);
+    if (later !== undefined) return { skipRest: true, nextIndex: later };
+    const first = members.find(hasOpenSets);
+    if (first !== undefined) return { skipRest: false, nextIndex: first !== at ? first : null };
+  } else if (hasOpenSets(at)) {
+    return { skipRest: false, nextIndex: null };
+  }
+  // The next exercise after this block that still has sets to do (finished ones are skipped).
+  for (let i = Math.max(...members) + 1; i < groups.length; i++) {
+    if (hasOpenSets(i)) return { skipRest: false, nextIndex: i };
+  }
+  return { skipRest: false, nextIndex: null };
 }

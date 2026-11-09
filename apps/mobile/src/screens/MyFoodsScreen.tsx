@@ -7,6 +7,7 @@ import { getRecord } from '../db/mutate';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { archiveFood, deleteSavedMeal, updateSavedMeal } from '../db/repositories/food';
 import { archiveRecipe } from '../db/repositories/recipes';
+import { saveFailed } from '../state/toastStore';
 import { colors } from '../theme';
 import { BottomSheet } from '../components/BottomSheet';
 import { ConfirmSheet, type ConfirmRequest } from '../components/ConfirmSheet';
@@ -180,7 +181,7 @@ function MealEditSheet({ mealId, onClose }: { mealId: string | null; onClose: ()
         <Pressable
           disabled={invalid}
           onPress={() => {
-            if (mealId) void updateSavedMeal(mealId, { name, keepItems: [...keep] });
+            if (mealId) void updateSavedMeal(mealId, { name, keepItems: [...keep] }).catch(saveFailed);
             onClose();
           }}
           className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}

@@ -187,9 +187,11 @@ export function BackupSection() {
         pending={pending}
         result={result}
         busy={busy === 'restore'}
+        error={pending ? error : null}
         onCancel={() => {
           setPending(null);
           setResult(null);
+          setError(null);
         }}
         onConfirm={() => {
           if (!pending) return;
@@ -248,12 +250,14 @@ function RestoreSheet({
   pending,
   result,
   busy,
+  error,
   onCancel,
   onConfirm,
 }: {
   pending: { summary: BackupSummary; skippedTables: string[] } | null;
   result: RestoreStats | null;
   busy: boolean;
+  error: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -302,6 +306,12 @@ function RestoreSheet({
                 wiped, and anything you’ve changed here more recently than the backup is kept.
               </Text>
             </View>
+            {error && (
+              <View className="mb-4 flex-row items-start gap-2 rounded-xl border border-settype-failure/30 bg-settype-failure/10 p-3">
+                <CircleAlert size={16} color={colors.danger} />
+                <Text className="flex-1 text-sm text-settype-failure">Restore failed. {error}</Text>
+              </View>
+            )}
             <Pressable
               onPress={onConfirm}
               disabled={busy}

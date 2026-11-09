@@ -51,6 +51,16 @@ export function nextPlanDay(plan: TrainingPlan, lastDayId: string | null): PlanD
   return plan.days[(i + 1) % plan.days.length]!;
 }
 
+/**
+ * Where the rotation stands: the next day, and the days already done this round (the plan days before the next
+ * one). A round starts again once its last day is done, so every day shows as to do.
+ */
+export function planCycle(plan: TrainingPlan, lastDayId: string | null): { next: PlanDay; done: string[] } {
+  const next = nextPlanDay(plan, lastDayId);
+  const i = plan.days.indexOf(next);
+  return { next, done: plan.days.slice(0, i).map((d) => d.id) };
+}
+
 const cleanName = (name: string) => name.trim().slice(0, 40);
 const custom = (days: PlanDay[]): TrainingPlan => ({ preset: null, days });
 

@@ -1,25 +1,16 @@
-import { useEffect, useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, SectionList, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ChevronRight } from 'lucide-react-native';
-import { volumeTypeSql } from '@gym/shared';
+import { addDaysToKey, toLocalDateKey, weekStartKey } from '@gym/shared';
+import { HISTORY_PAGE_SIZE, HISTORY_PAGE_SQL, namesPreview, type HistorySession } from '../db/repositories/stats';
 import { useLiveQuery } from '../db/useLiveQuery';
+import { useNextPlanDay } from '../hooks/usePlan';
+import { getSessionPRCount } from '../services/prEngine';
 import { useUnits } from '../state/settingsStore';
-import { colors } from '../theme';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { StatsView } from './AnalyticsScreen';
 import BodyScreen from './BodyScreen';
-
-interface HistoryRow {
-  id: string;
-  title: string | null;
-  start_time: number;
-  end_time: number;
-  exercises: number;
-  sets_done: number;
-  volume_kg: number;
-}
 
 type HistoryView = 'workouts' | 'stats' | 'body';
 const VIEWS = [
@@ -38,7 +29,7 @@ export default function HistoryScreen() {
   }, [params.view, params.at]);
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
-      <Text className="px-4 pt-4 text-2xl font-bold text-ink">History</Text>
+      <Text className="px-5 pt-5 text-2xl font-bold text-ink">History</Text>
       <SegmentedControl value={view} options={VIEWS} onChange={setView} className="mx-4 my-3" />
       {view === 'workouts' && <WorkoutsList />}
       {view === 'stats' && <StatsView />}
@@ -47,65 +38,216 @@ export default function HistoryScreen() {
   );
 }
 
+interface Week {
+  key: string;
+  title: string;
+  data: HistorySession[];
+}
+
+const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+/** Finished workouts grouped by Monday week, newest first; the current week is always shown. */
 function WorkoutsList() {
   const units = useUnits();
-  const { data } = useLiveQuery<HistoryRow>(
-    `SELECT ws.id, ws.title, ws.start_time, ws.end_time,
-            COUNT(DISTINCT se.id) AS exercises,
-            COALESCE(SUM(s.is_completed), 0) AS sets_done,
-            COALESCE(SUM(CASE WHEN s.is_completed = 1 AND s.set_type <> 'warmup' AND ${volumeTypeSql('e')}
-                              THEN s.weight_kg * s.reps END), 0) AS volume_kg
-     FROM workout_sessions ws
-     LEFT JOIN session_exercises se ON se.session_id = ws.id AND se.deleted_at IS NULL
-     LEFT JOIN exercise_definitions e ON e.id = se.exercise_id
-     LEFT JOIN sets s ON s.session_exercise_id = se.id AND s.deleted_at IS NULL
-     WHERE ws.end_time IS NOT NULL AND ws.deleted_at IS NULL
-     GROUP BY ws.id
-     ORDER BY ws.start_time DESC
-     LIMIT 200`,
-    [],
-    ['workout_sessions', 'session_exercises', 'sets', 'exercise_definitions'],
-  );
+  const next = useNextPlanDay();
+  // Asks for one more row than shown: the extra one says whether "Load more" is needed.
+  const [limit, setLimit] = useState(HISTORY_PAGE_SIZE);
+  const { data: fetched } = useLiveQuery<HistorySession>(HISTORY_PAGE_SQL, [limit + 1, 0], [
+    'workout_sessions',
+    'session_exercises',
+    'sets',
+    'exercise_definitions',
+  ]);
+  const hasMore = fetched.length > limit;
+  const data = useMemo(() => fetched.slice(0, limit), [fetched, limit]);
+  const todayKey = toLocalDateKey(new Date());
+  const thisWeek = weekStartKey(todayKey);
+  // Bumps when any logged set changes, so PR badges recompute after edits to older workouts.
+  const version = useMemo(() => data.map((r) => `${r.sets_done}:${r.volume_kg}`).join(','), [data]);
+
+  const weeks = useMemo(() => {
+    const out: Week[] = [{ key: thisWeek, title: 'This week', data: [] }];
+    for (const row of data) {
+      const key = weekStartKey(toLocalDateKey(new Date(row.start_time)));
+      let week = out[out.length - 1]!;
+      if (week.key !== key) {
+        week = { key, title: weekTitle(key), data: [] };
+        out.push(week);
+      }
+      week.data.push(row);
+    }
+    return out;
+  }, [data, thisWeek]);
 
   return (
-    <FlatList
-        data={data}
-        keyExtractor={(r) => r.id}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, gap: 8 }}
-        ListEmptyComponent={<Text className="text-ink-subtle">No finished workouts yet.</Text>}
-        renderItem={({ item }) => {
-          const minutes = Math.round((item.end_time - item.start_time) / 60_000);
-          return (
-            <Pressable
-              onPress={() => router.push(`/workout/${item.id}`)}
-              className="rounded-xl bg-surface-raised p-4 active:opacity-80"
-              accessibilityLabel={`${item.title ?? 'Workout'}. Tap for details`}
-            >
-              <View className="flex-row items-center gap-2">
-                <View className="flex-1">
-                  <Text className="text-base font-semibold text-ink">{item.title ?? 'Workout'}</Text>
-                  <Text className="text-xs text-ink-muted">{new Date(item.start_time).toLocaleString()}</Text>
-                </View>
-                <ChevronRight size={18} color={colors.faint} />
-              </View>
-              <View className="mt-3 flex-row gap-6">
-                <Stat label="Duration" value={`${minutes}m`} />
-                <Stat label="Exercises" value={String(item.exercises)} />
-                <Stat label="Sets" value={String(item.sets_done)} />
-                <Stat label="Volume" value={units.format(item.volume_kg, 0)} />
-              </View>
-            </Pressable>
-          );
-        }}
-      />
+    <SectionList
+      sections={weeks}
+      keyExtractor={(r) => r.id}
+      stickySectionHeadersEnabled={false}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+      ListFooterComponent={
+        hasMore ? (
+          <Pressable
+            onPress={() => setLimit((n) => n + HISTORY_PAGE_SIZE)}
+            className="mt-4 h-12 items-center justify-center rounded-xl bg-surface-raised active:opacity-70"
+            accessibilityLabel="Load more workouts"
+          >
+            <Text className="font-semibold text-ink">Load more</Text>
+          </Pressable>
+        ) : null
+      }
+      renderSectionHeader={({ section }) => (
+        <WeekHeader
+          week={section}
+          todayKey={todayKey}
+          format={(kg) => units.format(kg, 0)}
+          emptyHint={next ? `Nothing logged yet. ${next.day.name} is next.` : 'Nothing logged yet.'}
+        />
+      )}
+      renderItem={({ item, index, section }) => (
+        <WorkoutRow
+          item={item}
+          first={index === 0}
+          last={index === section.data.length - 1}
+          version={version}
+          volume={units.format(item.volume_kg, 0)}
+          distance={item.distance_m > 0 ? `${units.displayDistance(item.distance_m)} ${units.distanceLabel}` : null}
+        />
+      )}
+    />
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/** "19–25 Oct", or "28 Sep – 4 Oct" across months. */
+function weekTitle(monday: string): string {
+  const date = (key: string) => {
+    const [y, m, d] = key.split('-').map(Number) as [number, number, number];
+    return new Date(y, m - 1, d, 12);
+  };
+  const a = date(monday);
+  const b = date(addDaysToKey(monday, 6));
+  const month = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' });
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}–${b.getDate()} ${month(b)}`
+    : `${a.getDate()} ${month(a)} – ${b.getDate()} ${month(b)}`;
+}
+
+function WeekHeader({
+  week,
+  todayKey,
+  format,
+  emptyHint,
+}: {
+  week: Week;
+  todayKey: string;
+  format: (kg: number) => string;
+  emptyHint: string;
+}) {
+  const n = week.data.length;
+  const trained = new Set(week.data.map((r) => toLocalDateKey(new Date(r.start_time))));
+  const volume = week.data.reduce((s, r) => s + r.volume_kg, 0);
   return (
-    <View>
-      <Text className="text-xs text-ink-subtle">{label}</Text>
-      <Text className="font-semibold text-ink">{value}</Text>
+    <View className="mb-2 mt-5 gap-2">
+      <View className="flex-row items-end justify-between gap-3 px-1">
+        <View className="gap-0.5">
+          <Text className="text-base font-semibold text-ink">{week.title}</Text>
+          <Text className="text-[13px] text-ink-muted">
+            {n === 0 ? 'No workouts yet' : `${n} workout${n === 1 ? '' : 's'} · ${format(volume)}`}
+          </Text>
+        </View>
+        <View className="flex-row gap-1" accessibilityLabel={`${trained.size} training days`}>
+          {WEEKDAY_LETTERS.map((letter, i) => {
+            const key = addDaysToKey(week.key, i);
+            const done = trained.has(key);
+            const isToday = key === todayKey;
+            const future = key > todayKey;
+            return (
+              <View key={key} className="w-[18px] items-center gap-1">
+                <Text className={`text-[11px] ${isToday ? 'text-ink' : future ? 'text-ink-faint' : 'text-ink-muted'}`}>{letter}</Text>
+                <View
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    done ? 'bg-accent' : isToday ? 'border-2 border-ink' : future ? 'border border-surface-border' : 'bg-surface-border'
+                  }`}
+                />
+              </View>
+            );
+          })}
+        </View>
+      </View>
+      {n === 0 && (
+        <Pressable
+          onPress={() => router.navigate('/')}
+          className="flex-row items-center gap-3 rounded-[20px] bg-surface-raised p-4 active:opacity-80"
+        >
+          <Text className="flex-1 text-sm text-ink-muted">{emptyHint}</Text>
+          <Text className="text-sm font-semibold text-accent">Start</Text>
+        </Pressable>
+      )}
     </View>
+  );
+}
+
+function WorkoutRow({
+  item,
+  first,
+  last,
+  version,
+  volume,
+  distance,
+}: {
+  item: HistorySession;
+  first: boolean;
+  last: boolean;
+  version: string;
+  volume: string;
+  distance: string | null;
+}) {
+  const [prs, setPrs] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void getSessionPRCount(item.id).then((n) => live && setPrs(n));
+    return () => {
+      live = false;
+    };
+  }, [item.id, version]);
+
+  const start = new Date(item.start_time);
+  const minutes = Math.round((item.end_time - item.start_time) / 60_000);
+  const stats = [`${minutes} min`, `${item.sets_done} sets`, item.volume_kg > 0 || !distance ? volume : distance];
+  if (item.volume_kg > 0 && distance) stats.push(distance);
+
+  return (
+    <Pressable
+      onPress={() => router.push(`/workout/${item.id}`)}
+      className={`flex-row items-start gap-3.5 bg-surface-raised px-4 py-3 active:bg-surface-elevated ${
+        first ? 'rounded-t-[20px] pt-4' : 'border-t border-surface-elevated'
+      } ${last ? 'rounded-b-[20px] pb-4' : ''}`}
+      accessibilityLabel={`${item.title ?? 'Workout'}, ${start.toDateString()}. Tap for details`}
+    >
+      <View className="w-[34px] items-center pt-px">
+        <Text className="text-xs text-ink-muted">{start.toLocaleDateString(undefined, { weekday: 'short' })}</Text>
+        <Text className="text-xl font-semibold leading-6 text-ink">{start.getDate()}</Text>
+      </View>
+      <View className="flex-1 gap-[3px]">
+        <View className="flex-row items-center gap-2">
+          <Text className="shrink text-base font-semibold text-ink" numberOfLines={1}>
+            {item.title ?? 'Workout'}
+          </Text>
+          {prs > 0 && (
+            <View className="h-5 justify-center rounded-full bg-pr/15 px-2">
+              <Text className="text-xs font-semibold text-pr">
+                {prs} PR{prs === 1 ? '' : 's'}
+              </Text>
+            </View>
+          )}
+        </View>
+        {!!item.names && (
+          <Text className="text-[13px] text-ink-muted" numberOfLines={1}>
+            {namesPreview(item.names)}
+          </Text>
+        )}
+        <Text className="text-[13px] tabular-nums text-ink-subtle">{stats.join(' · ')}</Text>
+      </View>
+    </Pressable>
   );
 }

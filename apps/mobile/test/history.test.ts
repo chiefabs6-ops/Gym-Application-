@@ -141,6 +141,23 @@ describe('in-session editing (2.6)', () => {
     expect((await order(sessionId))[0]!.exercise_id).toBe(BENCH);
   });
 
+  it('drags an exercise to any place, keeping a superset it stays inside', async () => {
+    const sessionId = await workouts.startSession();
+    for (const ex of [BENCH, SQUAT, ROW]) await workouts.addExerciseToSession(sessionId, ex);
+    await workouts.setSessionSupersets(sessionId, [null, 'a', 'a']);
+
+    await workouts.reorderSessionExercise(sessionId, 0, 2); // Bench to the end: Squat + Row stay linked
+    expect(await order(sessionId)).toEqual([
+      { exercise_id: SQUAT, g: 'a' },
+      { exercise_id: ROW, g: 'a' },
+      { exercise_id: BENCH, g: null },
+    ]);
+    await workouts.reorderSessionExercise(sessionId, 2, 1); // Bench between them: the superset dissolves
+    expect((await order(sessionId)).map((r) => r.g)).toEqual([null, null, null]);
+    await workouts.reorderSessionExercise(sessionId, 1, 1); // same place: no-op
+    expect((await order(sessionId))[1]!.exercise_id).toBe(BENCH);
+  });
+
   it('replaces an exercise but keeps its sets', async () => {
     const { sessionExerciseId, setIds } = await logWorkout(BENCH, [{ weight: 60, reps: 10 }], { finish: false });
     await workouts.replaceSessionExercise(sessionExerciseId, SQUAT);

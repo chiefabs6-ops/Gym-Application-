@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Pencil } from 'lucide-react-native';
@@ -30,14 +30,19 @@ export function WorkoutDetailsSheet({ workout, onClose, onSave }: Props) {
   const [rpe, setRpe] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
 
-  // Each opening starts from the saved values.
+  // Each opening starts from the saved values. Only the open/closed state is a dependency, so a re-render
+  // (or a live-query refresh of the workout) while the sheet is open never wipes what the user typed.
+  const open = workout !== null;
+  const latest = useRef(workout);
+  latest.current = workout;
   useEffect(() => {
-    if (!workout) return;
-    setTitle(workout.title ?? '');
-    setMinutes(String(Math.max(1, Math.round((workout.end_time - workout.start_time) / 60_000))));
-    setRpe(workout.rpe);
-    setNotes(workout.notes ?? '');
-  }, [workout]);
+    const w = latest.current;
+    if (!open || !w) return;
+    setTitle(w.title ?? '');
+    setMinutes(String(Math.max(1, Math.round((w.end_time - w.start_time) / 60_000))));
+    setRpe(w.rpe);
+    setNotes(w.notes ?? '');
+  }, [open]);
 
   const parsedMinutes = Number(minutes);
   const minutesValid = Number.isInteger(parsedMinutes) && parsedMinutes >= 1 && parsedMinutes <= MAX_MINUTES;
@@ -68,6 +73,7 @@ export function WorkoutDetailsSheet({ workout, onClose, onSave }: Props) {
         value={title}
         onChangeText={setTitle}
         placeholder="Workout"
+        maxLength={120}
         placeholderTextColor={colors.faint}
         className="mb-4 rounded-xl bg-surface-elevated px-3 py-3 text-base text-ink"
       />

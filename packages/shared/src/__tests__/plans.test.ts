@@ -4,6 +4,7 @@ import {
   MAX_PLAN_DAYS,
   movePlanDay,
   nextPlanDay,
+  planCycle,
   PLAN_PRESETS,
   planFromPreset,
   removedDayIds,
@@ -109,5 +110,20 @@ describe('training_plan setting', () => {
     for (const bad of ['x', { days: [] }, { preset: null, days: [{ id: '', name: 'A' }] }, { preset: null }]) {
       expect(parseSettings({ training_plan: bad }).training_plan).toBeNull();
     }
+  });
+});
+
+describe('planCycle', () => {
+  it('marks the days before the next one as done this round', () => {
+    const plan = ppc();
+    expect(planCycle(plan, 'push')).toEqual({ next: plan.days[1], done: ['push'] });
+    expect(planCycle(plan, 'pull')).toEqual({ next: plan.days[2], done: ['push', 'pull'] });
+  });
+
+  it('starts a fresh round when the last day was the final one, or nothing is logged', () => {
+    const plan = ppc();
+    expect(planCycle(plan, 'cardio')).toEqual({ next: plan.days[0], done: [] });
+    expect(planCycle(plan, null)).toEqual({ next: plan.days[0], done: [] });
+    expect(planCycle(plan, 'gone')).toEqual({ next: plan.days[0], done: [] });
   });
 });

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Pressable,
+  ScrollView,
   Text,
   View,
   useWindowDimensions,
@@ -10,6 +12,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ChevronLeft, ChevronRight, Dumbbell, Flag, ListOrdered, Play, Plus } from 'lucide-react-native';
@@ -37,13 +40,15 @@ import { SetTypeSheet } from '../components/SetTypeSheet';
 import type { SetViewRow } from '../components/SetRow';
 import { WorkoutOverviewSheet } from '../components/WorkoutOverviewSheet';
 import {
-  moveSessionExercise,
+  reorderSessionExercise,
   removeSessionExercise,
   replaceSessionExercise,
   setSessionSupersets,
 } from '../db/repositories/workouts';
 import { useLiveQuery } from '../db/useLiveQuery';
-import { useDayRoutines, useNextPlanDay } from '../hooks/usePlan';
+import { useDayRoutines, usePlanCycle, type PlanCycleView } from '../hooks/usePlan';
+import { namesPreview } from '../db/repositories/stats';
+import { dayAndDate, shortDay, whenText } from '../components/dates';
 import { useIntervalRunStore } from '../state/intervalRunStore';
 import { useActiveWorkoutStore } from '../state/activeWorkoutStore';
 import { useSettingsStore } from '../state/settingsStore';
@@ -70,13 +75,23 @@ function StartWorkout() {
   const [picking, setPicking] = useState(false);
   /** Day whose routines are offered in the picker sheet. */
   const [chosen, setChosen] = useState<PlanDay | null>(null);
-  const next = useNextPlanDay();
-  const dayRoutines = useDayRoutines(next?.day.id ?? null);
-  const { data: templates } = useLiveQuery<{ id: string; title: string; folder: string | null; n: number }>(
-    `SELECT id, title, folder, json_array_length(template_exercises) AS n FROM workout_templates
-     WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
+  const cycle = usePlanCycle();
+  const plan = useSettingsStore((s) => s.training_plan);
+  const { data: templates } = useLiveQuery<{
+    id: string;
+    title: string;
+    folder: string | null;
+    plan_day_id: string | null;
+    n: number;
+    last_used: number | null;
+  }>(
+    `SELECT t.id, t.title, t.folder, t.plan_day_id, json_array_length(t.template_exercises) AS n,
+       (SELECT MAX(s.start_time) FROM workout_sessions s
+        WHERE s.template_id = t.id AND s.deleted_at IS NULL AND s.end_time IS NOT NULL) AS last_used
+     FROM workout_templates t
+     WHERE t.deleted_at IS NULL ORDER BY last_used IS NULL, last_used DESC, t.updated_at DESC`,
     [],
-    ['workout_templates'],
+    ['workout_templates', 'workout_sessions'],
   );
 
   if (draftDay !== undefined) {
@@ -91,76 +106,103 @@ function StartWorkout() {
     );
   }
 
-  /** The next-day card: one routine starts it, several open the picker, none opens the draft editor. */
-  const startNext = () => {
-    if (!next) return;
-    if (dayRoutines.length === 0) setDraftDay(next.day.id);
-    else if (dayRoutines.length === 1) void start({ templateId: dayRoutines[0]!.id, planDayId: next.day.id });
-    else setChosen(next.day);
-  };
+  const dayName = (id: string | null) => plan?.days.find((d) => d.id === id)?.name ?? null;
 
   return (
-    <View className="flex-1 gap-4 p-4">
-      <Text className="text-3xl font-bold text-ink">Workout</Text>
-      {next && (
-        <View className="gap-2">
+    <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 20, gap: 12 }}>
+      <View className="flex-row items-baseline justify-between px-1 pb-1">
+        <Text className="text-2xl font-bold text-ink">Workout</Text>
+        <Text className="text-sm text-ink-muted">
+          {new Date().toLocaleDateString(undefined, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+          })}
+        </Text>
+      </View>
+
+      {cycle && (
+        <NextDayCard
+          cycle={cycle}
+          onStart={(templateId) => void start({ templateId, planDayId: cycle.next.id })}
+          onBuild={() => setDraftDay(cycle.next.id)}
+        />
+      )}
+
+      {cycle ? (
+        <View className="flex-row gap-2">
           <Pressable
-            onPress={startNext}
-            className="flex-row items-center gap-3 rounded-card bg-accent px-4 py-4 active:opacity-80"
-            style={cardShadow}
+            onPress={() => setPicking(true)}
+            className="h-12 flex-1 items-center justify-center rounded-full bg-surface-raised active:opacity-70"
           >
-            <Play size={18} color={colors.bg} fill={colors.bg} />
-            <View className="flex-1">
-              <Text className="text-base font-bold text-surface">Next: {next.day.name}</Text>
-              <Text className="text-xs text-surface/80" numberOfLines={1}>
-                {dayRoutines.length > 0 ? dayRoutines.map((r) => r.title).join(' · ') : 'No routine yet – build one'}
-              </Text>
-            </View>
+            <Text className="text-sm font-medium text-ink">Another day</Text>
           </Pressable>
-          <Pressable onPress={() => setPicking(true)} hitSlop={8} className="self-center py-1">
-            <Text className="text-sm text-accent">Not today? Pick another day</Text>
+          <Pressable
+            onPress={() => setDraftDay(null)}
+            className="h-12 flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-surface-raised active:opacity-70"
+          >
+            <Plus size={16} color={colors.ink} />
+            <Text className="text-sm font-medium text-ink">Empty workout</Text>
           </Pressable>
         </View>
+      ) : (
+        <Pressable
+          onPress={() => setDraftDay(null)}
+          className="h-[52px] flex-row items-center justify-center gap-2 rounded-full bg-accent active:opacity-80"
+        >
+          <Plus size={18} color={colors.bg} />
+          <Text className="text-base font-bold text-surface">Start empty workout</Text>
+        </Pressable>
       )}
-      <Pressable
-        onPress={() => setDraftDay(null)}
-        className={`flex-row items-center justify-center gap-2 rounded-card py-4 active:opacity-80 ${
-          next ? 'border border-surface-border bg-surface-raised' : 'bg-accent'
-        }`}
-        style={next ? undefined : cardShadow}
-      >
-        <Plus size={18} color={next ? colors.accent : colors.bg} />
-        <Text className={`text-base font-bold ${next ? 'text-accent' : 'text-surface'}`}>Start empty workout</Text>
-      </Pressable>
 
       <BackupReminder />
 
-      <Text className="mt-4 text-xs font-semibold uppercase tracking-widest text-ink-subtle">Routines</Text>
-      <FlatList
-        data={templates}
-        keyExtractor={(t) => t.id}
-        contentContainerStyle={{ gap: 10 }}
-        ListEmptyComponent={<Text className="text-ink-subtle">Build a routine in the Routines tab.</Text>}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => void start({ templateId: item.id })}
-            className="flex-row items-center justify-between rounded-card border border-surface-border bg-surface-raised p-4 active:opacity-80"
-          >
-            <View>
-              <Text className="text-base font-semibold text-ink">{item.title}</Text>
-              <Text className="text-xs text-ink-subtle">
-                {item.folder ? `${item.folder} · ` : ''}
-                {item.n} exercise{item.n === 1 ? '' : 's'}
-              </Text>
-            </View>
-            <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-soft">
-              <Play size={16} color={colors.accent} fill={colors.accent} />
-            </View>
-          </Pressable>
-        )}
-      />
+      <View className="mt-3 flex-row items-baseline justify-between px-1">
+        <Text className="text-base font-semibold text-ink">
+          Routines <Text className="font-normal text-ink-muted">{templates.length}</Text>
+        </Text>
+        <Pressable onPress={() => router.navigate('/routines')} hitSlop={10}>
+          <Text className="text-sm text-ink-muted">Edit</Text>
+        </Pressable>
+      </View>
+      {templates.length === 0 ? (
+        <View className="rounded-[20px] bg-surface-raised p-4">
+          <Text className="text-sm text-ink-muted">Build a routine in the Routines tab.</Text>
+        </View>
+      ) : (
+        <View className="rounded-[20px] bg-surface-raised py-1">
+          {templates.map((item, i) => (
+            <Pressable
+              key={item.id}
+              onPress={() => void start({ templateId: item.id })}
+              className={`min-h-[60px] flex-row items-center gap-3 px-4 py-2 active:bg-surface-elevated ${
+                i > 0 ? 'border-t border-surface-elevated' : ''
+              }`}
+              accessibilityLabel={`Start ${item.title}`}
+            >
+              <View className="flex-1">
+                <Text className="text-base font-medium text-ink" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text className="text-[13px] text-ink-muted" numberOfLines={1}>
+                  {[
+                    dayName(item.plan_day_id) ?? item.folder,
+                    `${item.n} exercise${item.n === 1 ? '' : 's'}`,
+                    item.last_used ? shortDay(item.last_used) : 'Not done yet',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-soft">
+                <Play size={14} color={colors.accent} fill={colors.accent} />
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
-      <PlanDaySheet visible={picking} days={next?.plan.days ?? []} onClose={() => setPicking(false)} onPick={setChosen} />
+      <PlanDaySheet visible={picking} days={plan?.days ?? []} onClose={() => setPicking(false)} onPick={setChosen} />
       <DayRoutineSheet
         day={chosen}
         onClose={() => setChosen(null)}
@@ -176,6 +218,123 @@ function StartWorkout() {
         }}
       />
       <SaveRoutineSheet prompt={savePrompt} onClose={clearSavePrompt} />
+    </ScrollView>
+  );
+}
+
+/**
+ * The plan's rotation (done days green, the rest white), the next day with when it was last trained, and its
+ * routines to choose from. The least recently done routine is preselected.
+ */
+function NextDayCard({
+  cycle,
+  onStart,
+  onBuild,
+}: {
+  cycle: PlanCycleView;
+  onStart: (templateId: string) => void;
+  onBuild: () => void;
+}) {
+  const { plan, next, done, lastAt } = cycle;
+  const routines = useDayRoutines(next.id);
+  const [picked, setPicked] = useState<string | null>(null);
+  const selected = routines.find((r) => r.id === picked) ?? routines[0] ?? null;
+  const last = lastAt.get(next.id);
+  const title = /day$/i.test(next.name) ? next.name : `${next.name} day`;
+  const wide = plan.days.length > 5;
+
+  const cells = plan.days.map((d) => {
+    const isDone = done.has(d.id);
+    const doneAt = lastAt.get(d.id);
+    const when = isDone && doneAt ? `Done ${dayAndDate(doneAt)}` : d.id === next.id ? 'Up next' : 'To do';
+    return (
+      <View key={d.id} className={`gap-1.5 ${wide ? 'w-[76px]' : 'flex-1'}`}>
+        <View className={`h-1 rounded-full ${isDone ? 'bg-accent' : 'bg-ink'}`} />
+        <Text className={`text-[13px] font-semibold ${isDone ? 'text-accent' : 'text-ink'}`} numberOfLines={1}>
+          {d.name}
+        </Text>
+        <Text className={`text-xs ${isDone ? 'text-accent' : 'text-ink-muted'}`} numberOfLines={1}>
+          {when}
+        </Text>
+      </View>
+    );
+  });
+
+  return (
+    <View className="gap-[18px] rounded-[20px] bg-surface-raised p-5">
+      {wide ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+          {cells}
+        </ScrollView>
+      ) : (
+        <View className="flex-row gap-1.5" accessibilityLabel="Plan cycle">
+          {cells}
+        </View>
+      )}
+
+      <View className="gap-1">
+        <Text className="text-[32px] font-bold leading-9 text-ink">{title}</Text>
+        <Text className="text-sm text-ink-muted">
+          {last ? `Last ${next.name} was ${whenText(last)}.` : `First ${next.name} in your log.`}
+        </Text>
+      </View>
+
+      {routines.length > 1 && (
+        <View className="gap-1.5" accessibilityRole="radiogroup">
+          {routines.map((r) => {
+            const on = r.id === selected?.id;
+            return (
+              <Pressable
+                key={r.id}
+                onPress={() => setPicked(r.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: on }}
+                className={`min-h-[60px] flex-row items-center gap-3 rounded-xl px-3.5 py-2.5 ${on ? 'bg-surface-elevated' : ''}`}
+              >
+                <View
+                  className={`h-[18px] w-[18px] items-center justify-center rounded-full border-2 ${
+                    on ? 'border-ink' : 'border-ink-faint'
+                  }`}
+                >
+                  {on && <View className="h-2 w-2 rounded-full bg-ink" />}
+                </View>
+                <View className="flex-1">
+                  <Text className="text-base font-semibold text-ink">{r.title}</Text>
+                  <Text className="text-[13px] text-ink-muted" numberOfLines={1}>
+                    {namesPreview(r.names) || `${r.n} exercises`}
+                  </Text>
+                </View>
+                <Text className="text-xs text-ink-muted">{r.last_used ? shortDay(r.last_used) : 'New'}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+      {routines.length === 1 && (
+        <Text className="text-[13px] text-ink-muted" numberOfLines={2}>
+          {namesPreview(routines[0]!.names, 4)}
+        </Text>
+      )}
+
+      {selected ? (
+        <Pressable
+          onPress={() => onStart(selected.id)}
+          className="h-[52px] flex-row items-center justify-center gap-2 rounded-full bg-accent px-4 active:opacity-80"
+        >
+          <Play size={16} color={colors.bg} fill={colors.bg} />
+          <Text className="text-base font-bold text-surface" numberOfLines={1}>
+            Start {selected.title}
+          </Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={onBuild}
+          className="h-[52px] flex-row items-center justify-center gap-2 rounded-full bg-accent px-4 active:opacity-80"
+        >
+          <Plus size={18} color={colors.bg} />
+          <Text className="text-base font-bold text-surface">Build a {next.name} routine</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -403,8 +562,10 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
   );
 
   // The store can move to another exercise (superset flow, lock screen, notification): keep the pager on it.
+  // Any change of exercise (Next / Back, swipe, overview jump, auto-advance) also puts the keyboard away.
   const shownIndex = useRef(index);
   useEffect(() => {
+    if (currentIndex !== shownIndex.current) Keyboard.dismiss();
     if (count > 0 && currentIndex !== shownIndex.current && currentIndex < count) {
       scrollPagerTo(currentIndex, true);
     }
@@ -415,7 +576,22 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
     void setSessionSupersets(sessionId, isLinkedWithNext(groups, i) ? unlinkFromNext(groups, i) : linkWithNext(groups, i));
   };
 
-  const confirmFinish = () => setFinishOpen(true);
+  const confirmFinish = () => {
+    Keyboard.dismiss();
+    setFinishOpen(true);
+  };
+
+  /** What the rest leads into: the next unticked set here, else the next exercise. */
+  const restNext = useMemo(() => {
+    if (!current) return null;
+    const list = setsByExercise.get(current.id) ?? [];
+    const i = list.findIndex((s) => s.is_completed === 0);
+    if (i >= 0) {
+      if (list[i]!.set_type === 'warmup') return 'a warm-up set';
+      return `set ${list.slice(0, i + 1).filter((s) => s.set_type !== 'warmup').length}`;
+    }
+    return exercises[index + 1]?.name ?? null;
+  }, [current, setsByExercise, exercises, index]);
 
   const overviewItems = useMemo(
     () =>
@@ -434,8 +610,9 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
 
   return (
     <View className="flex-1">
-      {/* Sticky header */}
-      <View className="flex-row items-center gap-3 border-b border-surface-border px-4 py-3">
+      {/* Sticky header, with a progress strip: finished exercises green, the current one white. */}
+      <View className="gap-2.5 border-b border-surface-border px-4 py-3">
+      <View className="flex-row items-center gap-3">
         <Pressable
           onPress={() => setOverviewOpen(true)}
           className="h-10 w-10 items-center justify-center rounded-xl bg-surface-raised active:opacity-70"
@@ -449,9 +626,22 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
             {current ? current.name : 'Empty workout'}
           </Text>
         </View>
-        <Pressable onPress={confirmFinish} className="rounded-xl bg-accent px-4 py-2.5 active:opacity-80">
-          <Text className="font-bold text-surface">Finish</Text>
+        <Pressable onPress={confirmFinish} className="rounded-xl bg-surface-raised px-4 py-2.5 active:opacity-70">
+          <Text className="font-bold text-ink">Finish</Text>
         </Pressable>
+      </View>
+      {count > 0 && (
+        <Pressable onPress={() => setOverviewOpen(true)} hitSlop={8} className="flex-row gap-1" accessibilityLabel="Workout overview">
+          {overviewItems.map((e, i) => (
+            <View
+              key={e.id}
+              className={`h-1 flex-1 rounded-full ${
+                i === index ? 'bg-ink' : e.total > 0 && e.done === e.total ? 'bg-accent' : 'bg-surface-border'
+              }`}
+            />
+          ))}
+        </Pressable>
+      )}
       </View>
 
       {/* Pager */}
@@ -472,7 +662,10 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
             onMomentumScrollEnd={onMomentumScrollEnd}
             // A swipe always wins over a button-driven scroll still in flight.
-            onScrollBeginDrag={() => (scrollingTo.current = null)}
+            onScrollBeginDrag={() => {
+              scrollingTo.current = null;
+              Keyboard.dismiss();
+            }}
             keyboardShouldPersistTaps="handled"
             // Keep neighbours mounted so swiping back and forth is instant and inputs keep state.
             windowSize={5}
@@ -501,7 +694,7 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
         )}
       </View>
 
-      <RestTimerBanner />
+      <RestTimerBanner next={restNext} />
       <IntervalRunBanner />
 
       {/* Fixed navigation bar */}
@@ -525,13 +718,6 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
           <Text className="text-sm font-semibold text-ink" numberOfLines={1}>
             {current?.name ?? 'Add one to begin'}
           </Text>
-          {count > 1 && (
-            <View className="mt-1.5 flex-row gap-1">
-              {exercises.map((e, i) => (
-                <View key={e.id} className={`h-1 rounded-full ${i === index ? 'w-4 bg-accent' : 'w-1.5 bg-surface-border'}`} />
-              ))}
-            </View>
-          )}
         </Pressable>
 
         {count === 0 ? (
@@ -559,11 +745,12 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
         onRemove={(id) => void removeSessionExercise(id)}
         groups={groups}
         onToggleLink={toggleLink}
-        onMove={(i, delta) => {
-          void moveSessionExercise(sessionId, i, delta);
+        onReorder={(from, to) => {
+          void reorderSessionExercise(sessionId, from, to);
           // Keep the pager on the exercise that was on screen.
-          if (i === index) goTo(i + delta, false);
-          else if (i + delta === index) goTo(i, false);
+          if (from === index) goTo(to, false);
+          else if (from < index && to >= index) goTo(index - 1, false);
+          else if (from > index && to <= index) goTo(index + 1, false);
         }}
         onReplace={(id) => {
           setOverviewOpen(false);
@@ -577,15 +764,22 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
           setSelectorOpen(false);
           setReplacing(null);
         }}
+        // Replacing swaps one exercise; adding takes several at once, in the order they were ticked.
         onSelect={(e) => {
-          if (replacing) {
-            void replaceSessionExercise(replacing, e.id);
-            setReplacing(null);
-            return;
-          }
-          jumpToNewExercise.current = true;
-          void addExercise(e.id);
+          if (!replacing) return;
+          void replaceSessionExercise(replacing, e.id);
+          setReplacing(null);
         }}
+        onSelectMany={
+          replacing
+            ? undefined
+            : (picked) => {
+                jumpToNewExercise.current = true;
+                void (async () => {
+                  for (const e of picked) await addExercise(e.id);
+                })();
+              }
+        }
       />
       <SetTypeSheet set={setTypeTarget} onClose={() => setSetTypeTarget(null)} />
       <FinishWorkoutSheet

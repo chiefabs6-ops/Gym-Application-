@@ -7,9 +7,11 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: { backgroundColor: colors.bg, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.subtle,
+        // The active tab brightens to white; green is kept for actions and finished training.
+        tabBarStyle: { backgroundColor: colors.bg, borderTopWidth: 0, elevation: 0 },
+        tabBarActiveTintColor: colors.ink,
+        tabBarInactiveTintColor: colors.muted,
+        tabBarLabelStyle: { fontSize: 12 },
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Workout', tabBarIcon: ({ color }) => <Dumbbell size={22} color={color} /> }} />
