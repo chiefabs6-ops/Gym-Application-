@@ -98,7 +98,8 @@ export function unlinkFromNext(groups: GroupList, index: number, makeId: () => s
  * What happens after a set of exercise `at` is ticked. Inside a superset: go straight to the next member that
  * still has sets this round (no rest yet); after the last one, rest and go back to the first member with sets
  * left. Outside a superset: rest, stay while the exercise has sets left. Once the exercise (or the whole superset)
- * has no sets left: rest and move on to the exercise after it; on the last exercise, rest and stay.
+ * has no sets left: rest and move on to the next exercise after it that still has sets to do; if there is none
+ * (e.g. the last exercise), rest and stay.
  * `hasOpenSets(i)` must already treat the just-ticked set as done.
  */
 export function afterSetCompleted(
@@ -116,6 +117,9 @@ export function afterSetCompleted(
   } else if (hasOpenSets(at)) {
     return { skipRest: false, nextIndex: null };
   }
-  const after = Math.max(...members) + 1;
-  return { skipRest: false, nextIndex: after < groups.length ? after : null };
+  // The next exercise after this block that still has sets to do (finished ones are skipped).
+  for (let i = Math.max(...members) + 1; i < groups.length; i++) {
+    if (hasOpenSets(i)) return { skipRest: false, nextIndex: i };
+  }
+  return { skipRest: false, nextIndex: null };
 }

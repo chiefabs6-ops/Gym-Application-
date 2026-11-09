@@ -64,11 +64,14 @@ describe('after a set is ticked', () => {
   });
   it('after the last set of an exercise, rests and moves to the next exercise', () => {
     expect(afterSetCompleted([null, null, null], 0, (i) => i !== 0)).toEqual({ skipRest: false, nextIndex: 1 });
-    expect(afterSetCompleted([null, 'b', 'b'], 0, () => false)).toEqual({ skipRest: false, nextIndex: 1 });
+    expect(afterSetCompleted([null, 'b', 'b'], 0, (i) => i > 0)).toEqual({ skipRest: false, nextIndex: 1 });
+  });
+  it('skips exercises that are already finished', () => {
+    expect(afterSetCompleted([null, null, null], 0, (i) => i === 2)).toEqual({ skipRest: false, nextIndex: 2 });
+    expect(afterSetCompleted([null, null, null], 0, () => false)).toEqual({ skipRest: false, nextIndex: null });
   });
   it('on the last exercise, rests and stays', () => {
     expect(afterSetCompleted(g, 3, () => false)).toEqual({ skipRest: false, nextIndex: null });
-    expect(afterSetCompleted(g, 2, () => false)).toEqual({ skipRest: false, nextIndex: 3 });
     expect(afterSetCompleted(['a', 'a'], 1, () => false)).toEqual({ skipRest: false, nextIndex: null });
   });
 });

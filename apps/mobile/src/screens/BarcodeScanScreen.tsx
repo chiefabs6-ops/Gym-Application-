@@ -60,6 +60,9 @@ export default function BarcodeScanScreen() {
     } catch {
       setStatus({ kind: 'scanning' });
       showToast({ message: 'Couldn’t look that up. Try again.' });
+      // A short pause before scanning again, so a code still in front of the camera doesn't retry in a loop.
+      keepBusy = true;
+      setTimeout(() => (busy.current = false), 2500);
     } finally {
       if (!keepBusy) busy.current = false;
     }

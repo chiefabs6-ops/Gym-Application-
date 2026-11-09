@@ -345,7 +345,13 @@ export async function prepareNextSet(sessionId: string, fromIndex: number): Prom
        ORDER BY se.order_index, s.order_index`,
       [sessionId],
     );
-    const exerciseOrder = [...new Set(rows.map((r) => r.se_id))];
+    // Every exercise, including ones with no sets, so indexes match the workout pager.
+    const exerciseOrder = (
+      await db.getAllAsync<{ id: string }>(
+        `SELECT id FROM session_exercises WHERE session_id = ? AND deleted_at IS NULL ORDER BY order_index`,
+        [sessionId],
+      )
+    ).map((r) => r.id);
     const order = exerciseOrder.map((_, i) => i);
     const from = Math.min(Math.max(0, fromIndex), Math.max(0, order.length - 1));
     const search = [...order.slice(from), ...order.slice(0, from)];

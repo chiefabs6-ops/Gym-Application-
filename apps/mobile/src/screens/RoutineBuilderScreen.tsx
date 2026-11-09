@@ -835,15 +835,18 @@ export function FolderPicker({
 }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
+  // Latest typed text for commit(): the blur that follows a chip tap must see the cleared text, not a stale closure.
+  const textRef = useRef('');
   // A folder typed for this routine (not saved yet) still shows as a chip.
   const options = value && !folders.includes(value) ? [...folders, value] : folders;
   const type = (t: string) => {
     setText(t);
+    textRef.current = t;
     if (pendingRef) pendingRef.current = t;
   };
 
   const commit = () => {
-    const name = text.trim();
+    const name = textRef.current.trim();
     if (name) onChange(name);
     setAdding(false);
     type('');
@@ -851,9 +854,10 @@ export function FolderPicker({
 
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, alignItems: 'center' }}>
-      <Chip label="No folder" active={value === null} onPress={() => onChange(null)} />
+      {/* Tapping a chip wins over a half-typed new folder name. */}
+      <Chip label="No folder" active={value === null} onPress={() => { type(''); setAdding(false); onChange(null); }} />
       {options.map((f) => (
-        <Chip key={f} label={f} active={value === f} onPress={() => onChange(f)} />
+        <Chip key={f} label={f} active={value === f} onPress={() => { type(''); setAdding(false); onChange(f); }} />
       ))}
       {adding ? (
         <TextInput
@@ -940,6 +944,11 @@ function PerSetTable({
   const units = useUnits();
   const fields = TRACKING_FIELDS[trackingType];
   const update = (i: number, p: Partial<TemplateSet>) => onChange(sets.map((s, idx) => (idx === i ? { ...s, ...p } : s)));
+  // Stable row keys (sets have no ids): removing a set must not hand its inputs to the next set's row.
+  const keySeq = useRef(0);
+  const keys = useRef<number[]>([]);
+  while (keys.current.length < sets.length) keys.current.push(keySeq.current++);
+  if (keys.current.length > sets.length) keys.current = keys.current.slice(0, sets.length);
   const label = (f: SetField) =>
     f === 'weight'
       ? `${weightSign(trackingType)}${units.label}`.toUpperCase()
@@ -986,7 +995,7 @@ function PerSetTable({
         const style = SET_TYPE_STYLE[s.set_type];
         const number = s.set_type === 'warmup' ? 0 : ++working;
         return (
-          <View key={i} className="flex-row items-center gap-2 px-1">
+          <View key={keys.current[i]} className="flex-row items-center gap-2 px-1">
             <Pressable
               onPress={() => update(i, { set_type: nextType(s.set_type) })}
               className={`h-8 w-9 items-center justify-center rounded-lg ${style.bg}`}
@@ -1000,7 +1009,10 @@ function PerSetTable({
               </View>
             ))}
             <Pressable
-              onPress={() => onChange(sets.filter((_, idx) => idx !== i))}
+              onPress={() => {
+                keys.current = keys.current.filter((_, idx) => idx !== i);
+                onChange(sets.filter((_, idx) => idx !== i));
+              }}
               disabled={sets.length === 1}
               hitSlop={6}
               className={`h-8 w-8 items-center justify-center rounded-lg ${sets.length === 1 ? 'opacity-30' : 'active:bg-surface-elevated'}`}
@@ -1035,16 +1047,6 @@ function TimeInput({ value, onChange }: { value: number | null; onChange: (secon
   const [text, setText] = useState(formatDuration(value));
   const [bad, setBad] = useState(false);
   useFieldValidity(bad);
-  // Re-sync the text when the value changes from outside (set removed), unless the text already means that value.
-  const lastValue = useRef(value);
-  useEffect(() => {
-    if (lastValue.current === value) return;
-    lastValue.current = value;
-    if (parseDuration(text) !== value) {
-      setText(formatDuration(value));
-      setBad(false);
-    }
-  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const change = (t: string) => {
     setText(t);
     const v = parseDuration(t);
@@ -1103,13 +1105,6 @@ function NumberInput({
   };
   const bad = parse(text) === undefined;
   useFieldValidity(bad);
-  // Rows are keyed by index, so a removal hands this input a different value: re-sync unless the text already means it.
-  const lastValue = useRef(value);
-  useEffect(() => {
-    if (lastValue.current === value) return;
-    lastValue.current = value;
-    if (parse(text) !== value) setText(value === null ? '' : String(value));
-  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const change = (t: string) => {
     setText(t);
     const v = parse(t);
@@ -1151,13 +1146,6 @@ function WeightField({
     return Number.isFinite(n) && n >= 0 ? Math.min(2000, units.toKg(n)) : undefined;
   };
   useFieldValidity(parse(text) === undefined);
-  // Re-sync the text when the value changes from outside, unless the text already means that value.
-  const lastKg = useRef(valueKg);
-  useEffect(() => {
-    if (lastKg.current === valueKg) return;
-    lastKg.current = valueKg;
-    if (parse(text) !== valueKg) setText(units.display(valueKg));
-  }, [valueKg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const change = (t: string) => {
     setText(t);

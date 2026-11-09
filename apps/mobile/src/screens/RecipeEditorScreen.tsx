@@ -131,7 +131,7 @@ export default function RecipeEditorScreen() {
           </View>
         )}
 
-        <Pressable disabled={invalid || busy.current} onPress={() => void save()} className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}>
+        <Pressable disabled={invalid} onPress={() => void save()} className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}>
           <Text className="text-base font-bold text-surface">Save recipe</Text>
         </Pressable>
       </KeyboardAwareScrollView>
