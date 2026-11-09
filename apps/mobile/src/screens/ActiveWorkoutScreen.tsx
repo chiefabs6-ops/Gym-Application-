@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Pressable,
   ScrollView,
   Text,
@@ -561,8 +562,10 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
   );
 
   // The store can move to another exercise (superset flow, lock screen, notification): keep the pager on it.
+  // Any change of exercise (Next / Back, swipe, overview jump, auto-advance) also puts the keyboard away.
   const shownIndex = useRef(index);
   useEffect(() => {
+    if (currentIndex !== shownIndex.current) Keyboard.dismiss();
     if (count > 0 && currentIndex !== shownIndex.current && currentIndex < count) {
       scrollPagerTo(currentIndex, true);
     }
@@ -573,7 +576,10 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
     void setSessionSupersets(sessionId, isLinkedWithNext(groups, i) ? unlinkFromNext(groups, i) : linkWithNext(groups, i));
   };
 
-  const confirmFinish = () => setFinishOpen(true);
+  const confirmFinish = () => {
+    Keyboard.dismiss();
+    setFinishOpen(true);
+  };
 
   /** What the rest leads into: the next unticked set here, else the next exercise. */
   const restNext = useMemo(() => {
@@ -656,7 +662,10 @@ function WorkoutInProgress({ sessionId }: { sessionId: string }) {
             getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
             onMomentumScrollEnd={onMomentumScrollEnd}
             // A swipe always wins over a button-driven scroll still in flight.
-            onScrollBeginDrag={() => (scrollingTo.current = null)}
+            onScrollBeginDrag={() => {
+              scrollingTo.current = null;
+              Keyboard.dismiss();
+            }}
             keyboardShouldPersistTaps="handled"
             // Keep neighbours mounted so swiping back and forth is instant and inputs keep state.
             windowSize={5}

@@ -20,6 +20,7 @@ import {
   updateExercise,
 } from '../db/repositories/exercises';
 import { useUnits } from '../state/settingsStore';
+import { saveFailed } from '../state/toastStore';
 import { colors } from '../theme';
 import { BottomSheet } from './BottomSheet';
 
@@ -102,6 +103,8 @@ export function ExerciseEditorSheet({ target, onClose, onSaved }: Props) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onSaved?.({ id: id!, name: cleaned, primary_muscle: muscle, equipment, tracking_type: tracking });
       onClose();
+    } catch (e) {
+      saveFailed(e);
     } finally {
       setSaving(false);
     }

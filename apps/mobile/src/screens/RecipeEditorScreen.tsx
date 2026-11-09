@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BackHandler, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Plus, Trash2, X } from 'lucide-react-native';
 import { scaleNutrients, sumNutrients, type RecipeIngredient } from '@gym/shared';
 import { getRecord } from '../db/mutate';
 import { createRecipe, updateRecipe } from '../db/repositories/recipes';
+import { saveFailed } from '../state/toastStore';
 import { colors } from '../theme';
+import { ConfirmSheet, type ConfirmRequest } from '../components/ConfirmSheet';
 import { IngredientPickerSheet } from '../components/food/IngredientPickerSheet';
 
 const n0 = (v: number) => String(Math.round(v));
@@ -22,11 +24,16 @@ export default function RecipeEditorScreen() {
   const [name, setName] = useState('');
   const [ingredients, setIngredients] = useState<RecipeIngredient[]>([]);
   const [picking, setPicking] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const busy = useRef(false); // a double tap must not save twice
+  const loaded = useRef<{ name: string; ingredients: RecipeIngredient[] }>({ name: '', ingredients: [] });
+  const saved = useRef(false);
 
   useEffect(() => {
     if (isNew) return;
     void getRecord('recipes', id).then((r) => {
       if (!r) return;
+      loaded.current = { name: r.name, ingredients: r.ingredients };
       setName(r.name);
       setIngredients(r.ingredients);
     });
@@ -36,16 +43,47 @@ export default function RecipeEditorScreen() {
   const rawWeight = ingredients.reduce((s, i) => s + i.grams, 0);
   const invalid = name.trim() === '' || ingredients.length === 0;
 
+  const dirty = !saved.current && (name !== loaded.current.name || JSON.stringify(ingredients) !== JSON.stringify(loaded.current.ingredients));
+
   const save = async () => {
-    if (isNew) await createRecipe(name, ingredients);
-    else await updateRecipe(id, { name: name.trim().slice(0, 120), ingredients });
-    router.back();
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      if (isNew) await createRecipe(name, ingredients);
+      else await updateRecipe(id, { name: name.trim().slice(0, 120), ingredients });
+      saved.current = true;
+      router.back();
+    } catch (e) {
+      busy.current = false;
+      saveFailed(e);
+    }
   };
+
+  /** Leave; with unsaved changes ask first. */
+  const leave = useCallback(() => {
+    if (!dirty) {
+      router.back();
+      return;
+    }
+    setConfirm({ title: 'Discard changes?', message: 'Your changes to this recipe will be lost.', confirmLabel: 'Discard', tone: 'destructive', onConfirm: () => router.back() });
+  }, [dirty]);
+
+  // Android Back asks too (only while this screen is focused).
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (!dirty) return false;
+        leave();
+        return true;
+      });
+      return () => sub.remove();
+    }, [dirty, leave]),
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
       <View className="flex-row items-center gap-3 px-4 pt-3">
-        <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Close">
+        <Pressable onPress={leave} hitSlop={10} accessibilityLabel="Close">
           <X size={24} color={colors.ink} />
         </Pressable>
         <Text className="text-xl font-bold text-ink">{isNew ? 'New recipe' : 'Edit recipe'}</Text>
@@ -93,10 +131,11 @@ export default function RecipeEditorScreen() {
           </View>
         )}
 
-        <Pressable disabled={invalid} onPress={() => void save()} className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}>
+        <Pressable disabled={invalid || busy.current} onPress={() => void save()} className={`h-14 items-center justify-center rounded-xl bg-accent ${invalid ? 'opacity-40' : 'active:opacity-80'}`}>
           <Text className="text-base font-bold text-surface">Save recipe</Text>
         </Pressable>
       </KeyboardAwareScrollView>
+      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
       <IngredientPickerSheet visible={picking} onPick={(ing) => setIngredients((list) => [...list, ing])} onClose={() => setPicking(false)} />
     </SafeAreaView>
   );

@@ -109,11 +109,10 @@ export function sessionPRs(rows: SessionSetBests[]): Record<string, PRKind[]> {
   return out;
 }
 
-/** How many exercises of one session set at least one record (the History list's "2 PRs"). */
+/** How many sets of one session broke a record (the History list's "2 PRs"; same count as the detail page). */
 export async function getSessionPRCount(sessionId: string): Promise<number> {
   const rows = await db.getAllAsync<SessionSetBests>(SESSION_PR_SQL, [sessionId]);
-  const prs = sessionPRs(rows);
-  return new Set(rows.filter((r) => prs[r.set_id]).map((r) => r.exercise_id)).size;
+  return Object.keys(sessionPRs(rows)).length;
 }
 
 export async function getSessionPRs(sessionId: string): Promise<Record<string, PRKind[]>> {

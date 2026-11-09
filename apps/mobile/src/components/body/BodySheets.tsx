@@ -20,6 +20,7 @@ import {
   type UnitSystem,
 } from '@gym/shared';
 import { colors } from '../../theme';
+import { saveFailed } from '../../state/toastStore';
 import { BottomSheet } from '../BottomSheet';
 import { SegmentedControl } from '../SegmentedControl';
 import { Dropdown } from '../food/Dropdown';
@@ -255,7 +256,7 @@ export function TargetEditSheet({
               void onSave(target, v).then((r) => {
                 if (r.ok) onClose();
                 else setError(`Your macros add up to ${r.kcal.toLocaleString()} kcal, below your minimum of ${r.min.toLocaleString()} kcal.`);
-              });
+              }).catch(saveFailed);
             }}
           />
         </View>

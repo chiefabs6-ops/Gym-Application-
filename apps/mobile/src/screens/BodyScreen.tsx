@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Plus } from 'lucide-react-native';
-import { ACTIVITY_LABELS, addDaysToKey, ageOn, kgToLb, maintenanceKcal, toLocalDateKey, type Targets } from '@gym/shared';
+import { ACTIVITY_LABELS, addDaysToKey, ageOn, cmToFeetInches, kgToLb, maintenanceKcal, toLocalDateKey, type Targets } from '@gym/shared';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { currentWeightKg, deleteWeight, getTargetsForDate, logWeight, saveProfileAndGoal, setOverride, updateWeight, weightTrend } from '../db/repositories/body';
 import { ConfirmSheet, type ConfirmRequest } from '../components/ConfirmSheet';
@@ -78,7 +78,10 @@ export default function BodyScreen() {
   const height = !profile
     ? ''
     : units.unit === 'imperial'
-      ? `${Math.floor(profile.height_cm / 30.48)}′${Math.round((profile.height_cm / 2.54) % 12)}″`
+      ? (() => {
+          const { feet, inches } = cmToFeetInches(profile.height_cm);
+          return `${feet}′${inches}″`;
+        })()
       : `${profile.height_cm} cm`;
 
   return (
@@ -269,7 +272,7 @@ export default function BodyScreen() {
         unit={units.unit}
         profile={nutrition?.profile ?? null}
         goal={nutrition?.goal ?? null}
-        onSave={(p, g) => void saveProfileAndGoal(p, g)}
+        onSave={(p, g) => void saveProfileAndGoal(p, g).catch(saveFailed)}
         onClose={() => setEditingProfile(false)}
       />
       <TargetEditSheet

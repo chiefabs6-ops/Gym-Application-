@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Keyboard, Pressable, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Check, ChevronDown, Pause, Play, Timer } from 'lucide-react-native';
 import {
@@ -230,6 +230,8 @@ export const SetRow = memo(function SetRow({
 
   const toggle = () => {
     cancelPendingSave();
+    // The set is done (or reopened): put the keyboard away. The patch below already saves what was typed.
+    Keyboard.dismiss();
     if (!completed) {
       // Adopt ghost values for anything left blank, then persist before completing.
       const patch = typedPatch();

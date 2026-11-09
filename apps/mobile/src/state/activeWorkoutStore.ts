@@ -160,7 +160,8 @@ export const useActiveWorkoutStore = create<ActiveWorkoutState>()(
               )
             : { skipRest: false, nextIndex: null };
         await get().toggleSetComplete(setId, true, restSeconds, { skipRest: flow.skipRest });
-        // A short beat so the tick animation is seen before the next superset exercise slides in.
+        // A short beat so the tick animation is seen before the next exercise (superset member, or the exercise
+        // after a finished one) slides in.
         if (flow.nextIndex !== null) {
           const next = flow.nextIndex;
           setTimeout(() => get().sessionId === sessionId && set({ currentIndex: next }), 450);

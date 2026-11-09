@@ -56,9 +56,19 @@ describe('after a set is ticked', () => {
   it('skips members that are finished and rests when no one later has sets left', () => {
     expect(afterSetCompleted(g, 0, (i) => i === 2)).toEqual({ skipRest: true, nextIndex: 2 });
     expect(afterSetCompleted(g, 0, (i) => i === 0)).toEqual({ skipRest: false, nextIndex: null }); // only A1 left
-    expect(afterSetCompleted(g, 2, () => false)).toEqual({ skipRest: false, nextIndex: null }); // all done
+    expect(afterSetCompleted(g, 2, (i) => i === 3)).toEqual({ skipRest: false, nextIndex: 3 }); // superset done → next
   });
-  it('outside a superset just rests', () => {
+  it('outside a superset rests and stays while sets are left', () => {
     expect(afterSetCompleted(g, 3, () => true)).toEqual({ skipRest: false, nextIndex: null });
+    expect(afterSetCompleted([null, null], 0, () => true)).toEqual({ skipRest: false, nextIndex: null });
+  });
+  it('after the last set of an exercise, rests and moves to the next exercise', () => {
+    expect(afterSetCompleted([null, null, null], 0, (i) => i !== 0)).toEqual({ skipRest: false, nextIndex: 1 });
+    expect(afterSetCompleted([null, 'b', 'b'], 0, () => false)).toEqual({ skipRest: false, nextIndex: 1 });
+  });
+  it('on the last exercise, rests and stays', () => {
+    expect(afterSetCompleted(g, 3, () => false)).toEqual({ skipRest: false, nextIndex: null });
+    expect(afterSetCompleted(g, 2, () => false)).toEqual({ skipRest: false, nextIndex: 3 });
+    expect(afterSetCompleted(['a', 'a'], 1, () => false)).toEqual({ skipRest: false, nextIndex: null });
   });
 });

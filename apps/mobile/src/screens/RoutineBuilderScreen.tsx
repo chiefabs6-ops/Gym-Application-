@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, BackHandler, Pressable, ScrollView, SectionList, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -64,7 +64,25 @@ import { ROUTINE_NAMES_SQL } from '../hooks/usePlan';
 import { namesPreview } from '../db/repositories/stats';
 import { shortDay } from '../components/dates';
 import { useSettingsStore, useUnits } from '../state/settingsStore';
+import { saveFailed } from '../state/toastStore';
 import { colors } from '../theme';
+
+/**
+ * Inputs that hold text that isn't a valid value report it here, so save() can block and name the exercise.
+ * Keyed per input instance; an input unmounting (set or exercise removed) clears its entry.
+ */
+const FieldValidityContext = createContext<{ name: string; report: (id: string, name: string | null) => void } | null>(null);
+
+function useFieldValidity(bad: boolean) {
+  const ctx = useContext(FieldValidityContext);
+  const id = useId();
+  const ref = useRef(ctx);
+  ref.current = ctx;
+  useEffect(() => {
+    ref.current?.report(id, bad ? ref.current.name : null);
+    return () => ref.current?.report(id, null);
+  }, [bad, id]);
+}
 
 /** Editor row: the stored template exercise + display name + whether the typed reps text is invalid. */
 type DraftItem = TemplateExercise & { name: string; tracking_type: TrackingType; repsError?: boolean };
@@ -398,6 +416,14 @@ export function RoutineEditor({
     }),
   );
   const hasPlan = useSettingsStore((s) => s.training_plan) !== null;
+  /** Inputs currently holding invalid text (input id → exercise name), see useFieldValidity. */
+  const invalidFields = useRef(new Map<string, string>());
+  const reportInvalid = useCallback((id: string, name: string | null) => {
+    if (name === null) invalidFields.current.delete(id);
+    else invalidFields.current.set(id, name);
+  }, []);
+  /** Folder name typed in the picker but not committed yet (Save may be tapped before blur). */
+  const pendingFolder = useRef('');
 
   /** Returns why the draft can't be saved, or null. */
   const problem = (): ConfirmRequest | null => {
@@ -412,18 +438,30 @@ export function RoutineEditor({
         notice: true,
       };
     }
+    const invalid = [...invalidFields.current.values()][0];
+    if (invalid !== undefined) {
+      return {
+        title: `Check the numbers for ${invalid}`,
+        message: 'One of the targets isn’t a valid number or time. Fix it or clear it.',
+        confirmLabel: 'OK',
+        notice: true,
+      };
+    }
     return null;
   };
 
   const save = async () => {
     const p = problem();
     if (p) return setConfirm(p);
-    const fields = { title: title.trim(), notes, folder, plan_day_id: planDayId, template_exercises: toTemplateExercises(items) };
+    const folderNow = pendingFolder.current.trim() || folder;
+    const fields = { title: title.trim(), notes, folder: folderNow, plan_day_id: planDayId, template_exercises: toTemplateExercises(items) };
     setSaving(true);
     try {
       if (templateId) await updateTemplate(templateId, fields);
-      else await createTemplate(fields.title, fields.template_exercises, { notes, folder, planDayId });
+      else await createTemplate(fields.title, fields.template_exercises, { notes, folder: folderNow, planDayId });
       onDone();
+    } catch (e) {
+      saveFailed(e);
     } finally {
       setSaving(false);
     }
@@ -438,6 +476,8 @@ export function RoutineEditor({
     try {
       await start({ draft: toTemplateExercises(items), title: title.trim() || dayName, planDayId });
       onDone();
+    } catch (e) {
+      saveFailed(e);
     } finally {
       setSaving(false);
     }
@@ -461,7 +501,7 @@ export function RoutineEditor({
       const id = await duplicateTemplate(templateId, {
         title: title.trim() || 'Routine',
         notes,
-        folder,
+        folder: pendingFolder.current.trim() || folder,
         plan_day_id: planDayId,
         template_exercises: toTemplateExercises(items),
       });
@@ -531,6 +571,7 @@ export function RoutineEditor({
           <TextInput
             value={title}
             onChangeText={setTitle}
+            maxLength={120}
             placeholder={isDraft ? 'Workout name (optional)' : 'Routine name (e.g. Push Day)'}
             placeholderTextColor={colors.subtle}
             className="rounded-[14px] bg-surface-raised px-4 py-3.5 text-[17px] font-semibold text-ink"
@@ -544,7 +585,7 @@ export function RoutineEditor({
           {!isDraft && (
             <View className="gap-1.5">
               <Text className="pl-1 text-[13px] text-ink-muted">Folder</Text>
-              <FolderPicker value={folder} folders={folders} onChange={setFolder} />
+              <FolderPicker value={folder} folders={folders} onChange={setFolder} pendingRef={pendingFolder} />
             </View>
           )}
         </View>
@@ -583,6 +624,7 @@ export function RoutineEditor({
                 </Pressable>
               </View>
 
+              <FieldValidityContext.Provider value={{ name: item.name, report: reportInvalid }}>
               <View className="pl-1.5">
                 {item.sets ? (
                   <PerSetTable sets={item.sets} trackingType={item.tracking_type} onChange={(sets) => patch(index, { sets })} />
@@ -626,6 +668,7 @@ export function RoutineEditor({
                   </View>
                 )}
               </View>
+              </FieldValidityContext.Provider>
 
               <View className="flex-row flex-wrap items-center justify-between gap-3 pl-1.5">
                 <View className="flex-row items-center gap-2">
@@ -778,17 +821,32 @@ function collapseSets(sets: TemplateSet[]): Partial<DraftItem> {
 
 /* ───────────────────────────── Editor parts ───────────────────────────── */
 
-export function FolderPicker({ value, folders, onChange }: { value: string | null; folders: string[]; onChange: (f: string | null) => void }) {
+export function FolderPicker({
+  value,
+  folders,
+  onChange,
+  pendingRef,
+}: {
+  value: string | null;
+  folders: string[];
+  onChange: (f: string | null) => void;
+  /** Mirrors the folder name being typed, so the parent's Save can commit it without a blur / Enter. */
+  pendingRef?: { current: string };
+}) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
   // A folder typed for this routine (not saved yet) still shows as a chip.
   const options = value && !folders.includes(value) ? [...folders, value] : folders;
+  const type = (t: string) => {
+    setText(t);
+    if (pendingRef) pendingRef.current = t;
+  };
 
   const commit = () => {
     const name = text.trim();
     if (name) onChange(name);
     setAdding(false);
-    setText('');
+    type('');
   };
 
   return (
@@ -800,7 +858,7 @@ export function FolderPicker({ value, folders, onChange }: { value: string | nul
       {adding ? (
         <TextInput
           value={text}
-          onChangeText={setText}
+          onChangeText={type}
           onSubmitEditing={commit}
           onBlur={commit}
           autoFocus
@@ -976,6 +1034,17 @@ function PerSetTable({
 function TimeInput({ value, onChange }: { value: number | null; onChange: (seconds: number | null) => void }) {
   const [text, setText] = useState(formatDuration(value));
   const [bad, setBad] = useState(false);
+  useFieldValidity(bad);
+  // Re-sync the text when the value changes from outside (set removed), unless the text already means that value.
+  const lastValue = useRef(value);
+  useEffect(() => {
+    if (lastValue.current === value) return;
+    lastValue.current = value;
+    if (parseDuration(text) !== value) {
+      setText(formatDuration(value));
+      setBad(false);
+    }
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const change = (t: string) => {
     setText(t);
     const v = parseDuration(t);
@@ -1027,11 +1096,24 @@ function NumberInput({
   decimal?: boolean;
 }) {
   const [text, setText] = useState(value === null ? '' : String(value));
+  const parse = (t: string): number | null | undefined => {
+    if (t.trim() === '') return null;
+    const n = Number(t.replace(',', '.'));
+    return Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  const bad = parse(text) === undefined;
+  useFieldValidity(bad);
+  // Rows are keyed by index, so a removal hands this input a different value: re-sync unless the text already means it.
+  const lastValue = useRef(value);
+  useEffect(() => {
+    if (lastValue.current === value) return;
+    lastValue.current = value;
+    if (parse(text) !== value) setText(value === null ? '' : String(value));
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const change = (t: string) => {
     setText(t);
-    const n = Number(t.replace(',', '.'));
-    if (t.trim() === '') onChange(null);
-    else if (Number.isFinite(n) && n >= 0) onChange(n);
+    const v = parse(t);
+    if (v !== undefined) onChange(v);
   };
   return (
     <TextInput
@@ -1041,7 +1123,7 @@ function NumberInput({
       placeholder={placeholder}
       placeholderTextColor={colors.faint}
       selectTextOnFocus
-      className="rounded-lg bg-surface-elevated px-2 py-1.5 text-center tabular-nums text-ink"
+      className={`rounded-lg bg-surface-elevated px-2 py-1.5 text-center tabular-nums text-ink ${bad ? 'border border-settype-failure' : ''}`}
     />
   );
 }
@@ -1063,12 +1145,24 @@ function WeightField({
   const units = useUnits();
   const [text, setText] = useState(units.display(valueKg));
   useEffect(() => setText(units.display(valueKg)), [units.unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const parse = (t: string): number | null | undefined => {
+    if (t.trim() === '') return null;
+    const n = Number(t.replace(',', '.'));
+    return Number.isFinite(n) && n >= 0 ? Math.min(2000, units.toKg(n)) : undefined;
+  };
+  useFieldValidity(parse(text) === undefined);
+  // Re-sync the text when the value changes from outside, unless the text already means that value.
+  const lastKg = useRef(valueKg);
+  useEffect(() => {
+    if (lastKg.current === valueKg) return;
+    lastKg.current = valueKg;
+    if (parse(text) !== valueKg) setText(units.display(valueKg));
+  }, [valueKg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const change = (t: string) => {
     setText(t);
-    const n = Number(t.replace(',', '.'));
-    if (t.trim() === '') onChange(null);
-    else if (Number.isFinite(n) && n >= 0) onChange(Math.min(2000, units.toKg(n)));
+    const v = parse(t);
+    if (v !== undefined) onChange(v);
   };
 
   return (

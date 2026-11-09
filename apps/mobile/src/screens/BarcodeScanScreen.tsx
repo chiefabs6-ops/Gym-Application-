@@ -8,7 +8,7 @@ import { MEALS, toLocalDateKey, type FoodRow, type Meal } from '@gym/shared';
 import { findFoodByBarcode, logFood, normaliseBarcode, quickAdd } from '../db/repositories/food';
 import { lookupBarcode } from '../services/openFoodFacts';
 import { useFoodFormDraftStore } from '../state/foodFormDraftStore';
-import { showToast } from '../state/toastStore';
+import { saveFailed, showToast } from '../state/toastStore';
 import { colors } from '../theme';
 import { PortionSheet } from '../components/food/PortionSheet';
 import { QuickAddSheet } from '../components/food/QuickAddSheet';
@@ -35,23 +35,34 @@ export default function BarcodeScanScreen() {
   const handle = async (raw: string) => {
     if (busy.current) return;
     busy.current = true;
-    const barcode = normaliseBarcode(raw);
-    const mine = await findFoodByBarcode(barcode);
-    if (mine) {
-      setFound(mine);
-      return;
+    // Stays busy only while a result is on screen (found / navigating away); every other outcome frees the scanner.
+    let keepBusy = false;
+    try {
+      const barcode = normaliseBarcode(raw);
+      const mine = await findFoodByBarcode(barcode);
+      if (mine) {
+        keepBusy = true;
+        setFound(mine);
+        return;
+      }
+      setStatus({ kind: 'looking' });
+      const product = await lookupBarcode(barcode);
+      if (product && product !== 'offline') {
+        keepBusy = true;
+        useFoodFormDraftStore.getState().set(
+          { name: product.name, brand: product.brand, barcode, basis: product.basis, per100: product.per100, kcalKnown: product.kcalKnown, servings: product.serving ? [product.serving] : [], source: 'open_food_facts' },
+          { meal, date },
+        );
+        router.replace({ pathname: '/food/edit', params: { mode: 'check' } });
+        return;
+      }
+      setStatus({ kind: 'missing', barcode, offline: product === 'offline' });
+    } catch {
+      setStatus({ kind: 'scanning' });
+      showToast({ message: 'Couldn’t look that up. Try again.' });
+    } finally {
+      if (!keepBusy) busy.current = false;
     }
-    setStatus({ kind: 'looking' });
-    const product = await lookupBarcode(barcode);
-    if (product && product !== 'offline') {
-      useFoodFormDraftStore.getState().set(
-        { name: product.name, brand: product.brand, barcode, basis: product.basis, per100: product.per100, kcalKnown: product.kcalKnown, servings: product.serving ? [product.serving] : [], source: 'open_food_facts' },
-        { meal, date },
-      );
-      router.replace({ pathname: '/food/edit', params: { mode: 'check' } });
-      return;
-    }
-    setStatus({ kind: 'missing', barcode, offline: product === 'offline' });
   };
 
   const close = () => router.back();
@@ -144,8 +155,12 @@ export default function BarcodeScanScreen() {
         mode="add"
         onSubmit={async ({ serving, servings, meal: m }) => {
           if (!found) return;
-          await logFood({ ref: { kind: 'food', id: found.id }, name: found.name, per100: found, serving, servings, meal: m, localDate: date });
-          showToast({ message: `Added ${found.name}` });
+          try {
+            await logFood({ ref: { kind: 'food', id: found.id }, name: found.name, per100: found, serving, servings, meal: m, localDate: date });
+            showToast({ message: `Added ${found.name}` });
+          } catch (e) {
+            saveFailed(e);
+          }
         }}
         onClose={close}
       />
@@ -153,9 +168,13 @@ export default function BarcodeScanScreen() {
         visible={quick}
         defaultMeal={meal}
         onSubmit={async (v) => {
-          await quickAdd({ ...v, localDate: date });
-          showToast({ message: `Added ${v.name ?? 'Quick add'}` });
-          close();
+          try {
+            await quickAdd({ ...v, localDate: date });
+            showToast({ message: `Added ${v.name ?? 'Quick add'}` });
+            close();
+          } catch (e) {
+            saveFailed(e);
+          }
         }}
         onClose={() => setQuick(false)}
       />

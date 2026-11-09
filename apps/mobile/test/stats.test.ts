@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../src/db/client';
-import { HISTORY_SQL, namesPreview, PLAN_DAY_LAST_SQL, strengthProgress, type HistorySession } from '../src/db/repositories/stats';
+import { HISTORY_PAGE_SQL, HISTORY_SQL, namesPreview, PLAN_DAY_LAST_SQL, strengthProgress, type HistorySession } from '../src/db/repositories/stats';
 import { getSessionPRCount } from '../src/services/prEngine';
 import { BENCH, SQUAT, freshApp, logWorkout } from './helpers';
 
@@ -21,6 +21,22 @@ describe('History list', () => {
     expect(rows[0]!.names!.split('\n')).toHaveLength(1);
   });
 
+  it('pages newest first with no cap on the total', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const w = await logWorkout(BENCH, [{ weight: 50, reps: 5 }]);
+      await setStart(w.sessionId, (i + 1) * 1_000);
+      ids.push(w.sessionId);
+    }
+    const page1 = await db.getAllAsync<HistorySession>(HISTORY_PAGE_SQL, [2, 0]);
+    const page2 = await db.getAllAsync<HistorySession>(HISTORY_PAGE_SQL, [2, 2]);
+    const page3 = await db.getAllAsync<HistorySession>(HISTORY_PAGE_SQL, [2, 4]);
+    expect(page1.map((r) => r.id)).toEqual([ids[4], ids[3]]);
+    expect(page2.map((r) => r.id)).toEqual([ids[2], ids[1]]);
+    expect(page3.map((r) => r.id)).toEqual([ids[0]]);
+    expect(await db.getAllAsync(HISTORY_SQL)).toHaveLength(5);
+  });
+
   it('previews the first names and counts the rest', () => {
     expect(namesPreview('A\nB\nC\nD\nE')).toBe('A · B · C · +2');
     expect(namesPreview('A\nB')).toBe('A · B');
@@ -29,13 +45,13 @@ describe('History list', () => {
 });
 
 describe('PR count per workout', () => {
-  it('counts exercises that set a record, never on the first workout', async () => {
+  it('counts sets that set a record, never on the first workout', async () => {
     const a = await logWorkout(BENCH, [{ weight: 100, reps: 5 }]);
     const b = await logWorkout(BENCH, [{ weight: 105, reps: 5 }, { weight: 110, reps: 5 }]);
     await setStart(a.sessionId, 1_000);
     await setStart(b.sessionId, 2_000);
     expect(await getSessionPRCount(a.sessionId)).toBe(0);
-    expect(await getSessionPRCount(b.sessionId)).toBe(1); // two PR sets, one exercise
+    expect(await getSessionPRCount(b.sessionId)).toBe(2); // two PR sets (matches the detail page)
   });
 });
 

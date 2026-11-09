@@ -3,7 +3,7 @@ import { Pressable, SectionList, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { addDaysToKey, toLocalDateKey, weekStartKey } from '@gym/shared';
-import { HISTORY_SQL, namesPreview, type HistorySession } from '../db/repositories/stats';
+import { HISTORY_PAGE_SIZE, HISTORY_PAGE_SQL, namesPreview, type HistorySession } from '../db/repositories/stats';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { useNextPlanDay } from '../hooks/usePlan';
 import { getSessionPRCount } from '../services/prEngine';
@@ -50,12 +50,16 @@ const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 function WorkoutsList() {
   const units = useUnits();
   const next = useNextPlanDay();
-  const { data } = useLiveQuery<HistorySession>(HISTORY_SQL, [], [
+  // Asks for one more row than shown: the extra one says whether "Load more" is needed.
+  const [limit, setLimit] = useState(HISTORY_PAGE_SIZE);
+  const { data: fetched } = useLiveQuery<HistorySession>(HISTORY_PAGE_SQL, [limit + 1, 0], [
     'workout_sessions',
     'session_exercises',
     'sets',
     'exercise_definitions',
   ]);
+  const hasMore = fetched.length > limit;
+  const data = useMemo(() => fetched.slice(0, limit), [fetched, limit]);
   const todayKey = toLocalDateKey(new Date());
   const thisWeek = weekStartKey(todayKey);
   // Bumps when any logged set changes, so PR badges recompute after edits to older workouts.
@@ -81,6 +85,17 @@ function WorkoutsList() {
       keyExtractor={(r) => r.id}
       stickySectionHeadersEnabled={false}
       contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+      ListFooterComponent={
+        hasMore ? (
+          <Pressable
+            onPress={() => setLimit((n) => n + HISTORY_PAGE_SIZE)}
+            className="mt-4 h-12 items-center justify-center rounded-xl bg-surface-raised active:opacity-70"
+            accessibilityLabel="Load more workouts"
+          >
+            <Text className="font-semibold text-ink">Load more</Text>
+          </Pressable>
+        ) : null
+      }
       renderSectionHeader={({ section }) => (
         <WeekHeader
           week={section}

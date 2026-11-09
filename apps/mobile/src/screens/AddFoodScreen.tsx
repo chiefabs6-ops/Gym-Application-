@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { PlusCircle, ScanBarcode, Search, X, Zap } from 'lucide-react-native';
 import { MEAL_LABELS, MEALS, toLocalDateKey, type Meal, type Serving } from '@gym/shared';
@@ -71,6 +71,8 @@ export default function AddFoodScreen() {
   const [recipeError, setRecipeError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const onlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestQuery = useRef(''); // online results only apply while their query is still the one typed
+  const insets = useSafeAreaInsets();
 
   // What this visit has added to the meal: entries logged since the screen opened (Undo removes them again).
   const openedAt = useRef(Date.now()).current;
@@ -102,6 +104,7 @@ export default function AddFoodScreen() {
   // Local results on every keystroke; Open Food Facts after a 1-second pause or on submit (spec §5.2).
   useEffect(() => {
     const q = query.trim();
+    latestQuery.current = q;
     if (onlineTimer.current) clearTimeout(onlineTimer.current);
     setOnline(null);
     if (q === '') {
@@ -118,9 +121,12 @@ export default function AddFoodScreen() {
   }, [query]);
 
   const runOnline = async (q: string) => {
+    if (onlineTimer.current) clearTimeout(onlineTimer.current); // search pressed while the debounce is pending
+    onlineTimer.current = null;
+    latestQuery.current = q;
     setOnline('loading');
     const r = await searchProducts(q);
-    setOnline(r);
+    if (latestQuery.current === q) setOnline(r);
   };
 
   /** Toast with Undo. Batch portions undo through deleteBatchEntry so a finished batch reopens. */
@@ -227,7 +233,7 @@ export default function AddFoodScreen() {
                     title: 'Mark batch finished?',
                     message: `${l.recipeName} (${n0(l.remainingG)} g left) will no longer show as a leftover.`,
                     confirmLabel: 'Mark finished',
-                    onConfirm: () => void finishBatch(l.batchId).then(refreshLists),
+                    onConfirm: () => void finishBatch(l.batchId).then(refreshLists).catch(saveFailed),
                   })
                 }
               />
@@ -301,8 +307,8 @@ export default function AddFoodScreen() {
 
       {addedNow.length > 0 && (
         <View
-          className="absolute bottom-4 left-3 right-3 flex-row items-center gap-3 rounded-[20px] bg-surface-raised py-2.5 pl-4 pr-2.5"
-          style={{ shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 12, shadowOffset: { width: 0, height: 8 }, elevation: 10 }}
+          className="absolute left-3 right-3 flex-row items-center gap-3 rounded-[20px] bg-surface-raised py-2.5 pl-4 pr-2.5"
+          style={{ bottom: insets.bottom + 16, shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 12, shadowOffset: { width: 0, height: 8 }, elevation: 10 }}
         >
           <View className="flex-1">
             <Text className="text-[15px] font-semibold text-ink">
@@ -354,7 +360,7 @@ export default function AddFoodScreen() {
         onClose={() => setQuick(false)}
       />
 
-      <RecipeLogSheet visible={recipe !== null} recipeName={recipe?.name ?? ''} meal={meal} error={recipeError} onSubmit={(c) => void logRecipe(c)} onClose={() => setRecipe(null)} />
+      <RecipeLogSheet visible={recipe !== null} recipeName={recipe?.name ?? ''} meal={meal} error={recipeError} onSubmit={logRecipe} onClose={() => setRecipe(null)} />
 
       <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
     </SafeAreaView>

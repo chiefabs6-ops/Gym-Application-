@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -29,6 +29,7 @@ import { useLiveQuery } from '../db/useLiveQuery';
 import { SESSION_PR_SQL, sessionPRs, type SessionSetBests } from '../services/prEngine';
 import { useActiveWorkoutStore } from '../state/activeWorkoutStore';
 import { useSettingsStore, useUnits } from '../state/settingsStore';
+import { saveFailed } from '../state/toastStore';
 import { cardShadow, colors } from '../theme';
 
 interface SessionView extends WorkoutDetails {
@@ -127,8 +128,21 @@ export default function WorkoutDetailScreen() {
 
   if (loading || gone || !session || session.end_time === null) {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-surface">
-        {loading ? <ActivityIndicator color={colors.accent} /> : <Text className="text-ink-subtle">Workout not found.</Text>}
+      <SafeAreaView className="flex-1 items-center justify-center gap-4 bg-surface">
+        {loading ? (
+          <ActivityIndicator color={colors.accent} />
+        ) : (
+          <>
+            <Text className="text-ink-subtle">Workout not found.</Text>
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/history'))}
+              className="rounded-xl bg-surface-raised px-6 py-3 active:opacity-70"
+              accessibilityLabel="Back"
+            >
+              <Text className="font-semibold text-ink">Back</Text>
+            </Pressable>
+          </>
+        )}
       </SafeAreaView>
     );
   }
@@ -280,7 +294,7 @@ export default function WorkoutDetailScreen() {
         onClose={() => setDetailsOpen(false)}
         onSave={(fields) => {
           setDetailsOpen(false);
-          void workouts.updateSessionDetails(sessionId, fields);
+          workouts.updateSessionDetails(sessionId, fields).catch(saveFailed);
         }}
       />
       <ExerciseSelector
@@ -326,6 +340,21 @@ function ExerciseCard({ exercise, supersetLabel, sets, prs, editing, onToggleCom
   const [notes, setNotes] = useState(exercise.notes ?? '');
   useEffect(() => setNotes(exercise.notes ?? ''), [exercise.notes]);
 
+  // Save a typed note on blur, and also when edit mode ends or the card unmounts: on Android, tapping Done or
+  // Back doesn't always blur the input, so relying on onEndEditing alone could drop the note.
+  const latest = useRef({ notes, saved: exercise.notes, id: exercise.id });
+  latest.current = { notes, saved: exercise.notes, id: exercise.id };
+  const commitNotes = () => {
+    const { notes: text, saved, id } = latest.current;
+    if ((text.trim() || null) === saved) return;
+    latest.current.saved = text.trim() || null; // avoid saving the same text twice
+    workouts.updateSessionExerciseNotes(id, text).catch(saveFailed);
+  };
+  useEffect(() => {
+    if (!editing) return;
+    return commitNotes;
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Read-only view lists what was actually done; edit mode shows every set so unticked ones can be fixed.
   const visible = editing ? sets : sets.filter((s) => s.is_completed === 1);
   const skipped = sets.length - sets.filter((s) => s.is_completed === 1).length;
@@ -359,9 +388,7 @@ function ExerciseCard({ exercise, supersetLabel, sets, prs, editing, onToggleCom
         <TextInput
           value={notes}
           onChangeText={setNotes}
-          onEndEditing={() => {
-            if ((notes.trim() || null) !== exercise.notes) void workouts.updateSessionExerciseNotes(exercise.id, notes);
-          }}
+          onEndEditing={commitNotes}
           placeholder="Notes for this exercise"
           placeholderTextColor={colors.faint}
           multiline

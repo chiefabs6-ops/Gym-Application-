@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -43,7 +43,21 @@ export default function FoodScreen() {
   const setMeal = useFoodUiStore((s) => s.setLastMeal);
   const setLateNightChoice = useFoodUiStore((s) => s.setLateNightChoice);
 
-  const [date, setDate] = useState(() => toLocalDateKey(new Date()));
+  const [date, setDateState] = useState(() => toLocalDateKey(new Date()));
+  // The calendar day the app last set the date to, while the user hasn't picked another day (null = user picked one).
+  const followedToday = useRef<string | null>(toLocalDateKey(new Date()));
+  const setDate = useCallback((d: string) => {
+    followedToday.current = d === toLocalDateKey(new Date()) ? d : null;
+    setDateState(d);
+  }, []);
+  /** Overnight: if the date was "today" when set and the calendar day has changed, move to the new today. */
+  const rollToToday = useCallback(() => {
+    const today = toLocalDateKey(new Date());
+    if (followedToday.current !== null && followedToday.current !== today) {
+      followedToday.current = today;
+      setDateState(today);
+    }
+  }, []);
   const [picking, setPicking] = useState(false);
   const [askLateNight, setAskLateNight] = useState(false);
   const [askRecalc, setAskRecalc] = useState(false);
@@ -63,16 +77,18 @@ export default function FoodScreen() {
           ui.setLateNightChoice(null);
           setDate(toLocalDateKey(new Date()));
         }
+        rollToToday();
         void shouldPromptRecalc(new Date()).then(setAskRecalc);
       } else if (ui.lateNightChoice === null) setAskLateNight(true);
-    }, []),
+    }, [setDate, rollToToday]),
   );
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') useFoodUiStore.getState().setLateNightChoice(null);
+      else if (state === 'active' && !isLateNight(new Date())) rollToToday();
     });
     return () => sub.remove();
-  }, []);
+  }, [rollToToday]);
 
   const { data: entries } = useLiveQuery<FoodLogEntryRow>(
     `SELECT * FROM food_log_entries WHERE local_date = ? AND deleted_at IS NULL ORDER BY logged_at, rowid`,
@@ -213,8 +229,8 @@ export default function FoodScreen() {
         message="Your weight has changed since your targets were set. Recalculate your edited targets?"
         onClose={() => setAskRecalc(false)}
         choices={[
-          { label: 'Recalculate', tone: 'primary', onPress: () => void markPrompted(new Date()).then(() => acceptRecalcPrompt()) },
-          { label: 'Keep mine', onPress: () => void markPrompted(new Date()) },
+          { label: 'Recalculate', tone: 'primary', onPress: () => void markPrompted(new Date()).then(() => acceptRecalcPrompt()).catch(saveFailed) },
+          { label: 'Keep mine', onPress: () => void markPrompted(new Date()).catch(saveFailed) },
         ]}
       />
 
@@ -236,7 +252,9 @@ export default function FoodScreen() {
         fromDate={date}
         fromMeal={meal}
         onCopy={(ids, to) => {
-          void copyEntries(ids, to).catch(saveFailed).then(() => showToast({ message: `Copied ${ids.length} ${ids.length === 1 ? 'item' : 'items'} to ${formatDayKey(to.localDate)}` }));
+          void copyEntries(ids, to)
+            .then(() => showToast({ message: `Copied ${ids.length} ${ids.length === 1 ? 'item' : 'items'} to ${formatDayKey(to.localDate)}` }))
+            .catch(saveFailed);
         }}
         onClose={() => setCopy(null)}
       />
@@ -245,7 +263,7 @@ export default function FoodScreen() {
         visible={savingMeal}
         entries={pickable}
         defaultName={`${MEAL_LABELS[meal]} ${formatDayKey(date)}`}
-        onSave={(name, ids) => void saveMeal(name, ids).then(() => showToast({ message: `Saved "${name}"` }))}
+        onSave={(name, ids) => void saveMeal(name, ids).then(() => showToast({ message: `Saved "${name}"` })).catch(saveFailed)}
         onClose={() => setSavingMeal(false)}
       />
 

@@ -15,7 +15,7 @@ export interface HistorySession {
   names: string | null;
 }
 
-/** Finished workouts, newest first, with their totals. Warm-ups never count toward volume. */
+/** Finished workouts, newest first, with their totals (no limit). Warm-ups never count toward volume. */
 export const HISTORY_SQL = `
   SELECT ws.id, ws.title, ws.start_time, ws.end_time,
          COALESCE(SUM(s.is_completed), 0) AS sets_done,
@@ -31,8 +31,14 @@ export const HISTORY_SQL = `
   LEFT JOIN sets s ON s.session_exercise_id = se.id AND s.deleted_at IS NULL
   WHERE ws.end_time IS NOT NULL AND ws.deleted_at IS NULL
   GROUP BY ws.id
-  ORDER BY ws.start_time DESC
-  LIMIT 200`;
+  ORDER BY ws.start_time DESC`;
+
+/** One page of HISTORY_SQL. Bind [limit, offset]. */
+export const HISTORY_PAGE_SQL = `${HISTORY_SQL}
+  LIMIT ? OFFSET ?`;
+
+/** The History list loads this many workouts at a time ("Load more" adds another page). */
+export const HISTORY_PAGE_SIZE = 50;
 
 /** "Bench press · Overhead press · Dips · +3" from one-per-line names. */
 export function namesPreview(names: string | null, shown = 3): string {
