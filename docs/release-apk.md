@@ -29,6 +29,10 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk   # -r keep
 The QR code in `README.md` / `docs/update-qr.png` points at
 `https://github.com/chiefabs6-ops/Gym-Application-/releases/latest/download/gym-log.apk`, so it never changes:
 each new GitHub release with an asset named exactly `gym-log.apk` becomes what it downloads.
+The app's **Settings → About → Check for update** button (`src/services/appUpdate.ts`) reads the same "latest release"
+from the GitHub API, compares its tag with `expo.version`, downloads `gym-log.apk` and opens Android's installer
+(`REQUEST_INSTALL_PACKAGES`; Android asks once to allow installs from Gym Log). Drafts and prereleases are ignored,
+so a release only reaches phones once it is published as the latest.
 1. Bump `expo.version` and `expo.android.versionCode` in `apps/mobile/app.json` (Android refuses an APK whose
    versionCode is lower than the installed one).
 2. Prebuild + `npm run build:android:release`, then commit and push.
